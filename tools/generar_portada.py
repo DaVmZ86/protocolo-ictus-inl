@@ -238,6 +238,9 @@ def main():
     subprocess.run([exe, '--headless=new', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=2',
                     f'--window-size={ANCHO},{ALTO}', f'--screenshot={ruta_png}', '--default-background-color=00000000',
                     ruta_svg.as_uri()], check=True, capture_output=True, timeout=120)
+    # Compresión sin pérdida (reducir a 256 colores produce bandas en los degradados)
+    from PIL import Image
+    Image.open(ruta_png).convert('RGB').save(ruta_png, optimize=True, compress_level=9)
     print('->', ruta_png.relative_to(RAIZ))
 
 
