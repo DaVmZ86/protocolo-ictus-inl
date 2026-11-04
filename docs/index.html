@@ -8,7 +8,12 @@
   <title>Cédula EVC · NLR</title>
   <meta name="description" content="Cédula electrónica de recolección de datos del protocolo PI-2026-7694 (EVC isquémico agudo e índice neutrófilo/linfocito).">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 17h4l2-6 3 11 2-5h3' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
-  <link rel="stylesheet" href="css/estilos.css">
+  <link rel="apple-touch-icon" href="icons/icono-180.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0f766e">
+  <meta name="apple-mobile-web-app-title" content="Cédula EVC">
+  <!-- ?v=… obliga a celulares y computadoras a descargar la versión nueva tras cada publicación -->
+  <link rel="stylesheet" href="css/estilos.css?v=1.1.0">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -34,6 +39,7 @@
 
   <div id="banner-demo" class="banner-demo" hidden>
     <b>Modo demostración.</b> Los datos se guardan sólo en este navegador y no llegan a Google Drive.
+    <a id="salir-demo" href="./" hidden>Salir e iniciar sesión con Google</a>
   </div>
 
   <main id="app">
@@ -47,8 +53,10 @@
           <li>La primera vez se envía una <b>solicitud de acceso</b> al administrador.</li>
           <li>Cuando te apruebe podrás capturar y dar seguimiento a los registros.</li>
         </ol>
+        <div id="aviso-navegador" class="aviso aviso-navegador" hidden></div>
         <div id="boton-google" class="boton-google"></div>
-        <button id="btn-demo" class="boton primario" type="button" hidden>Entrar en modo demostración</button>
+        <a id="enlace-real" class="boton primario" href="./" hidden>Iniciar sesión con Google</a>
+        <button id="btn-demo" class="boton secundario" type="button" hidden>Entrar en modo demostración</button>
         <p class="nota">Los datos se guardan en una hoja de cálculo privada en Google Drive. No se capturan nombres,
           números de afiliación, domicilios ni teléfonos de los pacientes; cada caso se identifica con un folio.
           <a href="privacidad.html">Aviso de privacidad</a>.</p>
@@ -157,6 +165,14 @@
           <li>Puedes <b>guardar con datos incompletos</b> y volver después. La lista de registros indica cuándo abre la ventana de 90 ± 14 días de cada paciente.</li>
           <li><b>Seguimiento a 90 días:</b> abre el registro, captura la fuente de información, la mRS (usa el asistente de entrevista telefónica del Anexo 6 si aplica) y la mortalidad.</li>
         </ol>
+        <h3>Usar en el celular (iPhone y Android)</h3>
+        <ol>
+          <li>Abre <b>https://davmz86.github.io/protocolo-ictus-inl/</b> en <b>Safari</b> (iPhone) o <b>Chrome</b> (Android).
+            Si llegó por WhatsApp, Facebook u otra app, usa «Abrir en el navegador»: dentro de esas apps Google puede bloquear el inicio de sesión.</li>
+          <li>Toca <b>Acceder con Google</b> y elige tu cuenta. Si no aparece la ventana de Google, permite las ventanas emergentes para este sitio.</li>
+          <li>Para tenerla como app: iPhone → botón <b>Compartir</b> → «Agregar a pantalla de inicio»; Android → menú <b>⋮</b> → «Agregar a la pantalla principal».</li>
+          <li>Si ves «Modo demostración», toca «Salir e iniciar sesión con Google» o abre la dirección sin <code>?demo</code> al final.</li>
+        </ol>
         <h3>Confidencialidad</h3>
         <p>No escribas nombre, NSS, domicilio ni teléfono en ningún campo (tampoco en observaciones). La lista que relaciona cada folio con el expediente
           debe resguardarse fuera de esta aplicación, en un archivo protegido con contraseña, con acceso sólo para el investigador principal y el asesor.</p>
@@ -173,9 +189,9 @@
   <div id="cargando" class="cargando-global" hidden><div class="giro"></div><span id="cargando-texto">Cargando…</span></div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="js/config.js"></script>
-  <script src="js/esquema.js"></script>
-  <script src="js/spss.js"></script>
-  <script src="js/app.js"></script>
+  <script src="js/config.js?v=1.1.0"></script>
+  <script src="js/esquema.js?v=1.1.0"></script>
+  <script src="js/spss.js?v=1.1.0"></script>
+  <script src="js/app.js?v=1.1.0"></script>
 </body>
 </html>

@@ -116,7 +116,13 @@ En 1–2 minutos GitHub Pages publica el cambio y el modo demostración desapare
 5. La aplicación advierte inconsistencias (p. ej., mRS = 6 sin defunción, HDL + LDL > colesterol total, BH fuera de las primeras 24 h) sin impedir guardar; los valores fuera de rango sí impiden guardar.
 6. Si se pierde la conexión o se cierra la pestaña, el formulario se conserva como **borrador** en ese equipo y se ofrece recuperarlo.
 
-Para capacitar a alguien sin tocar la base real: https://davmz86.github.io/protocolo-ictus-inl/?demo
+Para capacitar a alguien sin tocar la base real: https://davmz86.github.io/protocolo-ictus-inl/?demo (el aviso amarillo incluye el enlace para salir e iniciar sesión con Google).
+
+### En el celular (iPhone y Android)
+
+- Abre la dirección en **Safari** (iPhone) o **Chrome** (Android). Si el enlace llegó por WhatsApp, Facebook, Instagram, etc., usa «Abrir en el navegador»: Google bloquea el inicio de sesión dentro de los navegadores integrados de algunas apps, y la página lo advierte con un botón «Copiar enlace».
+- Para tenerla como app: iPhone → **Compartir → Agregar a pantalla de inicio**; Android → **⋮ → Agregar a la pantalla principal**. Se abre siempre en el navegador, que es donde el inicio de sesión de Google funciona de forma fiable.
+- Tras cada actualización los celulares cargan la versión nueva automáticamente (los archivos llevan `?v=` con la versión).
 
 ## 4. Exportar a SPSS 27
 

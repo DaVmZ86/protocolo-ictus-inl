@@ -9,7 +9,17 @@
   'use strict';
 
   const CFG = window.CONFIG || {};
-  const DEMO = !CFG.CLIENT_ID || !CFG.API_URL || new URLSearchParams(location.search).has('demo');
+  const CONFIG_COMPLETA = !!(CFG.CLIENT_ID && CFG.API_URL);
+  const DEMO = !CONFIG_COMPLETA || new URLSearchParams(location.search).has('demo');
+  const URL_REAL = location.origin + location.pathname;   // la misma página sin ?demo
+
+  // Navegadores dentro de otras apps (Facebook, Instagram, vistas web de Android/iOS):
+  // Google bloquea ahí el inicio de sesión («disallowed_useragent»).
+  function enNavegadorIntegrado() {
+    const ua = navigator.userAgent || '';
+    if (/FBAN|FBAV|FB_IAB|Instagram|Line\/|LinkedInApp|Snapchat|TikTok|musical_ly|Bytedance|; wv\)/i.test(ua)) return true;
+    return /iPhone|iPad|iPod/i.test(ua) && !/Safari\//i.test(ua);  // WKWebView de iOS sin Safari
+  }
   const E = window.EVC;
   const S = window.EVC_SPSS;
   const ESQ = E.ESQUEMA;
@@ -225,7 +235,8 @@
         callback: alRecibirCredencial,
         auto_select: true,
         cancel_on_tap_outside: true,
-        use_fedcm_for_prompt: true
+        use_fedcm_for_prompt: true,
+        itp_support: true          // Safari (iPhone) y otros navegadores con prevención de rastreo
       });
       st.gisListo = true;
     }
@@ -275,9 +286,24 @@
     if (DEMO) {
       $('#btn-demo').hidden = false;
       $('#boton-google').hidden = true;
+      // Si la app ya está conectada a Google y se entró con ?demo, ofrece volver al acceso real
+      if (CONFIG_COMPLETA) { $('#enlace-real').href = URL_REAL; $('#enlace-real').hidden = false; }
     } else {
+      if (enNavegadorIntegrado()) avisarNavegadorIntegrado();
       pintarBotonGoogle($('#boton-google')).then(() => { try { google.accounts.id.prompt(); } catch (e) { /* One Tap opcional */ } });
     }
+  }
+
+  function avisarNavegadorIntegrado() {
+    const aviso = $('#aviso-navegador');
+    aviso.innerHTML = `<span>Abriste el enlace dentro de otra app. Google puede bloquear ahí el inicio de sesión.
+      Ábrelo en <b>Safari</b> (iPhone) o <b>Chrome</b> (Android): menú <b>⋯</b> o <b>Compartir</b> → «Abrir en el navegador».</span>
+      <button type="button" class="boton secundario chico" id="btn-copiar-enlace">Copiar enlace</button>`;
+    aviso.hidden = false;
+    $('#btn-copiar-enlace').onclick = async () => {
+      try { await navigator.clipboard.writeText(URL_REAL); toast('Enlace copiado. Pégalo en Safari o Chrome.', 'ok'); }
+      catch (e) { prompt('Copia este enlace y ábrelo en Safari o Chrome:', URL_REAL); }
+    };
   }
 
   function aplicarUsuario(r) {
@@ -970,6 +996,7 @@
 
   async function iniciar() {
     $('#banner-demo').hidden = !DEMO;
+    if (DEMO && CONFIG_COMPLETA) { $('#salir-demo').href = URL_REAL; $('#salir-demo').hidden = false; }
     enlazarGlobales();
     const guardada = DEMO ? null : ss.leer('evc:sesion');
     if (guardada) {
