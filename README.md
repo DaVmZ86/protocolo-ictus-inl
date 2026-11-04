@@ -1,3 +1,9 @@
+<p align="center">
+  <a href="https://davmz86.github.io/protocolo-ictus-inl/">
+    <img src="assets/readme/portada.png" width="100%" alt="Cédula EVC · NLR — Índice neutrófilo/linfocito y dependencia funcional a 90 días en el evento cerebrovascular isquémico agudo. Cerebro con territorio de la arteria cerebral media en isquemia por un trombo, neutrófilos, linfocitos y escala de Rankin modificada.">
+  </a>
+</p>
+
 # Cédula electrónica de recolección de datos — Protocolo PI-2026-7694
 
 Aplicación web **gratuita y de código abierto** para capturar la *Hoja de recolección de datos* (Anexo 3) del protocolo:
@@ -181,8 +187,10 @@ apps-script/
   Esquema.gs              ← copia exacta de docs/js/esquema.js (la genera tools/sincronizar.mjs)
   appsscript.json         ← manifiesto (opcional, para usar clasp)
 diccionario/              ← diccionario de variables y sintaxis SPSS de ejemplo (generados)
+assets/readme/            ← portada del README (ilustración original, editable en SVG)
 tools/
   sincronizar.mjs         ← copia el esquema a Apps Script y regenera el diccionario
+  generar_portada.py      ← genera la portada del README (assets/readme/portada.svg y .png)
   prueba_backend.mjs      ← 19 pruebas del backend con Google simulado
 ```
 
