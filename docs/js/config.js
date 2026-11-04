@@ -11,5 +11,5 @@ window.CONFIG = {
   CLIENT_ID: '',
 
   // URL de la aplicación web de Apps Script (termina en /exec)
-  API_URL: ''
+  API_URL: 'https://script.google.com/macros/s/AKfycbwe5Q0hzyB5MRn1SUGBAYuUXSTDCffK6-MErF-z15WlyvdfurH1pkkeG3SL1KpWqOMKAw/exec'
 };
