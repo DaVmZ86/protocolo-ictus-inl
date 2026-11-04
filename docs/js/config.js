@@ -8,7 +8,7 @@
  * ============================================================================= */
 window.CONFIG = {
   // ID de cliente OAuth de Google Cloud (termina en .apps.googleusercontent.com)
-  CLIENT_ID: '',
+  CLIENT_ID: '83604596124-544v4ma7o8cvap31b299joojvatt86aa.apps.googleusercontent.com',
 
   // URL de la aplicación web de Apps Script (termina en /exec)
   API_URL: 'https://script.google.com/macros/s/AKfycbwe5Q0hzyB5MRn1SUGBAYuUXSTDCffK6-MErF-z15WlyvdfurH1pkkeG3SL1KpWqOMKAw/exec'
