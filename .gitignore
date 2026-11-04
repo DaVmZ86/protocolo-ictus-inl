@@ -1,0 +1,19 @@
+# ── Nunca subir datos de pacientes al repositorio ──
+*.csv
+*.sav
+*.zsav
+*.xlsx
+*.xls
+*.ods
+*.spv
+datos/
+exportaciones/
+
+# ── Entorno local ──
+.claude/
+.clasp.json
+.clasprc.json
+node_modules/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,23 @@
+name: Pruebas
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Esquema.gs y diccionario sincronizados con docs/js/esquema.js
+        run: node tools/sincronizar.mjs --verificar
+      - name: Pruebas del backend (Google simulado)
+        run: node tools/prueba_backend.mjs
+        env:
+          TZ: America/Mexico_City
+      - name: Sintaxis de los archivos JavaScript
+        run: |
+          for f in docs/js/*.js; do node --check "$f"; done

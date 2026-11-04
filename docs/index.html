@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <title>Cédula EVC · NLR</title>
+  <meta name="description" content="Cédula electrónica de recolección de datos del protocolo PI-2026-7694 (EVC isquémico agudo e índice neutrófilo/linfocito).">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f766e'/%3E%3Cpath d='M9 17h4l2-6 3 11 2-5h3' stroke='white' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/estilos.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <header class="barra">
+    <a class="marca" href="#/registros" aria-label="Inicio">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="7" fill="currentColor"/><path d="M9 17h4l2-6 3 11 2-5h3" stroke="#fff" stroke-width="2.4" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </span>
+      <span class="marca-texto"><b>Cédula EVC · NLR</b><small>Protocolo PI-2026-7694</small></span>
+    </a>
+    <nav id="nav" class="nav" hidden>
+      <a href="#/registros" data-vista="registros">Registros</a>
+      <a href="#/nuevo" data-vista="nuevo">Nuevo</a>
+      <a href="#/usuarios" data-vista="usuarios" class="solo-admin" hidden>Usuarios <span id="contador-pendientes" class="contador" hidden></span></a>
+      <a href="#/exportar" data-vista="exportar" class="solo-admin" hidden>Exportar</a>
+      <a href="#/ayuda" data-vista="ayuda">Ayuda</a>
+    </nav>
+    <div id="usuario" class="usuario" hidden>
+      <span id="usuario-nombre" class="usuario-nombre"></span>
+      <button id="btn-salir" class="boton secundario chico" type="button">Salir</button>
+    </div>
+  </header>
+
+  <div id="banner-demo" class="banner-demo" hidden>
+    <b>Modo demostración.</b> Los datos se guardan sólo en este navegador y no llegan a Google Drive.
+  </div>
+
+  <main id="app">
+    <!-- ===================== Inicio de sesión ===================== -->
+    <section id="vista-login" class="vista" hidden>
+      <div class="tarjeta login">
+        <h1>Cédula de recolección de datos</h1>
+        <p class="titulo-protocolo" id="titulo-protocolo"></p>
+        <ol class="pasos-login">
+          <li>Inicia sesión con tu cuenta de Google (Gmail).</li>
+          <li>La primera vez se envía una <b>solicitud de acceso</b> al administrador.</li>
+          <li>Cuando te apruebe podrás capturar y dar seguimiento a los registros.</li>
+        </ol>
+        <div id="boton-google" class="boton-google"></div>
+        <button id="btn-demo" class="boton primario" type="button" hidden>Entrar en modo demostración</button>
+        <p class="nota">Los datos se guardan en una hoja de cálculo privada en Google Drive. No se capturan nombres,
+          números de afiliación, domicilios ni teléfonos de los pacientes; cada caso se identifica con un folio.</p>
+      </div>
+    </section>
+
+    <!-- ===================== Pendiente de aprobación ===================== -->
+    <section id="vista-pendiente" class="vista" hidden>
+      <div class="tarjeta login">
+        <h1 id="pendiente-titulo">Solicitud enviada</h1>
+        <p id="pendiente-texto"></p>
+        <div class="acciones-centro">
+          <button id="btn-comprobar" class="boton primario" type="button">Volver a comprobar</button>
+          <button id="btn-salir-2" class="boton secundario" type="button">Salir</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== Lista de registros ===================== -->
+    <section id="vista-registros" class="vista" hidden>
+      <div class="cabecera-vista">
+        <h2>Registros</h2>
+        <a class="boton primario" href="#/nuevo">+ Nuevo registro</a>
+      </div>
+      <div id="resumen-registros" class="tarjetas-resumen"></div>
+      <div class="filtros">
+        <input id="buscar" type="search" placeholder="Buscar folio (EVC-001)…" aria-label="Buscar folio">
+        <select id="filtro-estado" aria-label="Filtrar por seguimiento">
+          <option value="">Todos los estados</option>
+          <option value="en_ventana">En ventana de 90 días (contactar)</option>
+          <option value="programado">Seguimiento programado</option>
+          <option value="vencido">Ventana vencida</option>
+          <option value="completo">Seguimiento completo</option>
+          <option value="sin_fecha">Falta fecha del evento</option>
+          <option value="no_incluido">No incluidos</option>
+          <option value="eliminado">Eliminados</option>
+        </select>
+      </div>
+      <div class="tabla-contenedor">
+        <table id="tabla-registros" class="tabla">
+          <thead>
+            <tr><th>Folio</th><th>Fase</th><th>Evento</th><th>Dictamen</th><th>NIHSS</th><th>NLR</th><th>mRS 90</th><th>Seguimiento</th><th>Avance</th><th>Modificado</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== Formulario ===================== -->
+    <section id="vista-formulario" class="vista" hidden>
+      <div class="cabecera-form">
+        <a href="#/registros" class="enlace-volver">← Registros</a>
+        <h2 id="titulo-form">Registro</h2>
+        <div class="avance-global"><div class="barra-avance"><span id="avance-global-barra"></span></div><span id="avance-global-texto"></span></div>
+      </div>
+      <nav id="indice-secciones" class="indice-secciones" aria-label="Secciones del formulario"></nav>
+      <div id="aviso-borrador" class="aviso" hidden></div>
+      <form id="formulario" novalidate autocomplete="off"></form>
+      <div class="pie-guardar">
+        <button id="btn-avisos" class="avisos-resumen" type="button" hidden></button>
+        <span id="estado-guardado" class="estado-guardado"></span>
+        <button id="btn-guardar" class="boton primario" type="button">Guardar registro</button>
+      </div>
+    </section>
+
+    <!-- ===================== Usuarios (administrador) ===================== -->
+    <section id="vista-usuarios" class="vista" hidden>
+      <div class="cabecera-vista">
+        <h2>Usuarios y solicitudes de acceso</h2>
+      </div>
+      <p class="texto-tenue">Aprueba sólo a las personas autorizadas por el protocolo. El rol <b>admin</b> permite aprobar usuarios y exportar la base.</p>
+      <div class="tabla-contenedor">
+        <table id="tabla-usuarios" class="tabla">
+          <thead><tr><th>Cuenta</th><th>Estado</th><th>Rol</th><th>Solicitud</th><th>Último acceso</th><th>Acciones</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ===================== Exportar (administrador) ===================== -->
+    <section id="vista-exportar" class="vista" hidden>
+      <div class="cabecera-vista"><h2>Exportar a SPSS</h2></div>
+      <div id="resumen-exportar" class="tarjetas-resumen"></div>
+      <div class="tarjeta">
+        <ol class="pasos-exportar">
+          <li><b>Descarga la base</b> (CSV con valores codificados, una fila por paciente).
+            <div><button id="btn-csv" class="boton primario" type="button">Descargar base (.csv)</button></div></li>
+          <li><b>Descarga la sintaxis</b> el mismo día (contiene el nombre del CSV, las etiquetas de variables y de valores y el nivel de medición).
+            <div><button id="btn-sps" class="boton primario" type="button">Descargar sintaxis SPSS (.sps)</button></div></li>
+          <li>Guarda ambos archivos en una carpeta, por ejemplo <code>C:\SPSS\Protocolo_EVC</code>.</li>
+          <li>En <b>SPSS 27</b>: Archivo → Abrir → Sintaxis… → elige el .sps, escribe la ruta de tu carpeta en la línea <code>CD</code> y usa Ejecutar → Todo.
+            Se crea <code>base_evc.sav</code> listo para el análisis.</li>
+        </ol>
+        <p id="enlace-hoja" class="texto-tenue"></p>
+      </div>
+    </section>
+
+    <!-- ===================== Ayuda ===================== -->
+    <section id="vista-ayuda" class="vista" hidden>
+      <div class="cabecera-vista"><h2>Ayuda</h2></div>
+      <div class="tarjeta prosa">
+        <h3>Flujo de trabajo</h3>
+        <ol>
+          <li><b>Nuevo registro:</b> el folio se propone automáticamente (EVC-001, EVC-002…). Verifica los criterios de selección: el dictamen se calcula solo.</li>
+          <li>Captura las secciones II a VI desde el expediente clínico electrónico. El NLR, su categoría, la categoría NIHSS, el tiempo síntomas-puerta y la ventana de seguimiento se calculan automáticamente.</li>
+          <li>Puedes <b>guardar con datos incompletos</b> y volver después. La lista de registros indica cuándo abre la ventana de 90 ± 14 días de cada paciente.</li>
+          <li><b>Seguimiento a 90 días:</b> abre el registro, captura la fuente de información, la mRS (usa el asistente de entrevista telefónica del Anexo 6 si aplica) y la mortalidad.</li>
+        </ol>
+        <h3>Confidencialidad</h3>
+        <p>No escribas nombre, NSS, domicilio ni teléfono en ningún campo (tampoco en observaciones). La lista que relaciona cada folio con el expediente
+          debe resguardarse fuera de esta aplicación, en un archivo protegido con contraseña, con acceso sólo para el investigador principal y el asesor.</p>
+        <h3>Escala de Rankin modificada (Anexo 4)</h3>
+        <div id="tabla-mrs"></div>
+        <h3>Diccionario de variables</h3>
+        <p class="texto-tenue">Nombre de la variable en la hoja de datos y en SPSS, etiqueta y codificación.</p>
+        <div class="tabla-contenedor"><table id="tabla-diccionario" class="tabla compacta"></table></div>
+      </div>
+    </section>
+  </main>
+
+  <div id="modal" class="modal-fondo" hidden></div>
+  <div id="cargando" class="cargando-global" hidden><div class="giro"></div><span id="cargando-texto">Cargando…</span></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script src="js/config.js"></script>
+  <script src="js/esquema.js"></script>
+  <script src="js/spss.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
