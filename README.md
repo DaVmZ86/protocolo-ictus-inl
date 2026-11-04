@@ -136,7 +136,7 @@ El diccionario completo está en [`diccionario/DICCIONARIO_VARIABLES.md`](diccio
 
 ## 5. Seguridad y confidencialidad
 
-- **No se capturan identificadores** (nombre, NSS, domicilio, teléfono); cada paciente es un folio. La lista que relaciona folio ↔ expediente debe guardarse **fuera de la aplicación**, en un archivo protegido con contraseña (investigador principal y asesor), como establece el protocolo.
+- La base que se exporta para el análisis (SPSS) identifica a cada paciente **sólo con un folio**. El acceso a la aplicación y a la hoja de cálculo está restringido al investigador principal y al asesor, como establece el protocolo.
 - La hoja de cálculo está en el Drive del administrador y **no se comparte**. Si el investigador principal necesita verla directamente, compártela sólo con su cuenta.
 - Cada inicio de sesión se verifica con Google (firma, audiencia, correo verificado). Las sesiones duran 12 h y se cierran con **Salir**; revocar a un usuario surte efecto de inmediato.
 - Toda alta, edición, cambio de usuario y exportación queda en la hoja **Bitacora**. Las ediciones simultáneas del mismo registro se detectan y no se sobrescriben.

@@ -1,7 +1,7 @@
 ﻿* Encoding: UTF-8.
 * ==========================================================================.
 * Sintaxis generada por la aplicación de recolección de datos.
-* Protocolo PI-2026-7694 · esquema v1.0.0 · ejemplo (descargue la versión actual desde la aplicación → Exportar).
+* Protocolo PI-2026-7694 · esquema v1.1.0 · ejemplo (descargue la versión actual desde la aplicación → Exportar).
 * PASOS: 1) Guarde esta sintaxis y base_evc_AAAA-MM-DD.csv en la misma carpeta.
 *        2) Escriba la ruta de esa carpeta en la línea CD de abajo.
 *        3) Menú Ejecutar > Todo. Se crea base_evc.sav con todas las etiquetas.

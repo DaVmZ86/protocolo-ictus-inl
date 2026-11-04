@@ -20,14 +20,23 @@
  * ============================================================================= */
 
 var HOJA_DATOS = 'Datos';
+var HOJA_IDENT = 'Identificacion';
 var HOJA_USUARIOS = 'Usuarios';
 var HOJA_BITACORA = 'Bitacora';
 var COLS_META = ['creado_por', 'fecha_creacion', 'modificado_por', 'fecha_modificacion'];
 var COLS_USUARIOS = ['email', 'nombre', 'estado', 'rol', 'fecha_solicitud', 'fecha_decision', 'decidido_por', 'ultimo_acceso'];
 var COLS_BITACORA = ['fecha', 'email', 'accion', 'folio', 'detalle'];
-var ESTADOS = ['pendiente', 'aprobado', 'rechazado'];
+var ESTADOS = ['pendiente', 'aprobado'];      // un usuario rechazado o revocado se elimina de la lista
 var ROLES = ['capturista', 'admin'];
 var HORAS_SESION = 12;
+
+// Archivos adjuntos (PDF, fotos, videos): una carpeta por folio dentro de CARPETA_ARCHIVOS
+var CARPETA_ARCHIVOS = 'Cédula EVC - Archivos por registro';
+var MAX_BYTES_ARCHIVO = 250 * 1024 * 1024;   // 250 MB por archivo
+var TAM_FRAGMENTO = 4 * 1024 * 1024;         // 4 MB (múltiplo de 256 KB, requisito de Drive)
+var EXT_PERMITIDAS = /\.(pdf|jpe?g|png|gif|webp|heic|heif|bmp|tiff?|mp4|mov|m4v|3gp|3g2|webm|avi|mkv)$/i;
+
+function colsIdent_() { return ['folio'].concat(EVC.camposIdentificacion().map(function (c) { return c.id; })).concat(['modificado_por', 'fecha_modificacion']); }
 
 /* -----------------------------------------------------------------------------
  * Menú de la hoja de cálculo
@@ -51,15 +60,19 @@ function inicializar() {
   if (propietario) props.setProperty('PROPIETARIO', propietario);
 
   var datos = obtenerHoja_(ss, HOJA_DATOS);
+  var ident = obtenerHoja_(ss, HOJA_IDENT);
   var usuarios = obtenerHoja_(ss, HOJA_USUARIOS);
   var bitacora = obtenerHoja_(ss, HOJA_BITACORA);
   darFormatoDatos_(datos);
+  var encI = asegurarEncabezados_(ident, colsIdent_());
+  ident.getRange(2, 1, Math.max(ident.getMaxRows() - 1, 1), encI.length).setNumberFormat('@');
+  ident.setTabColor('#b42318');
   var encU = asegurarEncabezados_(usuarios, COLS_USUARIOS);
   usuarios.getRange(2, 1, Math.max(usuarios.getMaxRows() - 1, 1), encU.length).setNumberFormat('@');
   var encB = asegurarEncabezados_(bitacora, COLS_BITACORA);
   bitacora.getRange(2, 1, Math.max(bitacora.getMaxRows() - 1, 1), encB.length).setNumberFormat('@');
 
-  [datos, usuarios, bitacora].forEach(function (h) {
+  [datos, ident, usuarios, bitacora].forEach(function (h) {
     h.setFrozenRows(1);
     h.getRange(1, 1, 1, h.getLastColumn()).setFontWeight('bold').setBackground('#dff3ef');
   });
@@ -81,17 +94,25 @@ function inicializar() {
     guardarUsuario_(u);
   }
 
+  // Usuarios con estado «rechazado» de versiones anteriores: se eliminan de la lista.
+  purgarRechazados_(propietario || 'inicializar');
+
+  // Carpeta de archivos adjuntos (junto a la hoja) y acceso de lectura para los usuarios aprobados.
+  var raiz = carpetaRaiz_(true);
+  leerUsuarios_().forEach(function (x) { if (x.estado === 'aprobado' && x.email !== propietario) compartirArchivos_(x.email, true); });
+
   // Elimina hojas vacías sobrantes (p. ej. «Hoja 1») y deja «Datos» al inicio.
   ss.getSheets().forEach(function (h) {
-    var propia = [HOJA_DATOS, HOJA_USUARIOS, HOJA_BITACORA].indexOf(h.getName()) >= 0;
-    if (!propia && h.getLastRow() === 0 && h.getLastColumn() === 0 && ss.getSheets().length > 3) ss.deleteSheet(h);
+    var propia = [HOJA_DATOS, HOJA_IDENT, HOJA_USUARIOS, HOJA_BITACORA].indexOf(h.getName()) >= 0;
+    if (!propia && h.getLastRow() === 0 && h.getLastColumn() === 0 && ss.getSheets().length > 4) ss.deleteSheet(h);
   });
   ss.setActiveSheet(datos);
   ss.moveActiveSheet(1);
   bitacora_(propietario || 'sistema', 'inicializar', '', 'esquema v' + EVC.ESQUEMA.version);
 
-  avisar_('Listo: hojas «Datos», «Usuarios» y «Bitacora» preparadas.\n\n' +
-    'Administrador: ' + (propietario || '(desconocido)') + '\n\n' +
+  avisar_('Listo: hojas «Datos», «Identificacion», «Usuarios» y «Bitacora» preparadas.\n\n' +
+    'Administrador: ' + (propietario || '(desconocido)') + '\n' +
+    'Carpeta de archivos: ' + raiz.getName() + '\n\n' +
     'Siguiente paso: menú Protocolo EVC → 2) Configurar Client ID de Google.');
 }
 
@@ -171,17 +192,31 @@ function ejecutar_(req) {
       return { ok: true, folio: EVC.siguienteFolio(leerRegistros_().map(function (x) { return x.registro.folio; })) };
     case 'guardarRegistro':
       return guardarRegistro_(u, datos);
+    case 'listarArchivos':
+      return listarArchivos_(datos);
+    case 'iniciarSubida':
+      return iniciarSubida_(u, datos);
+    case 'subirFragmento':
+      return subirFragmento_(u, datos);
+    case 'estadoSubida':
+      return estadoSubida_(u, datos);
+    case 'eliminarArchivo':
+      return eliminarArchivo_(u, datos);
   }
 
   if (!esAdmin_(u)) throw error_('NO_PERMITIDO', 'Sólo un administrador puede realizar esta acción.');
   switch (accion) {
     case 'listarUsuarios':
+      purgarRechazados_(u.email);
       return { ok: true, usuarios: leerUsuarios_().map(publico_) };
     case 'actualizarUsuario':
       return actualizarUsuario_(u, datos);
+    case 'eliminarUsuario':
+      return eliminarUsuario_(u, datos);
     case 'exportar':
       bitacora_(u.email, 'exportar', '', '');
-      return { ok: true, registros: leerRegistros_().map(function (x) { return x.registro; }) };
+      // La base de análisis nunca incluye los datos de localización del paciente.
+      return { ok: true, registros: leerRegistros_().map(function (x) { return EVC.sinIdentificadores(x.registro); }) };
   }
   throw error_('ACCION_DESCONOCIDA', 'Acción no reconocida: ' + accion);
 }
@@ -338,6 +373,7 @@ function guardarUsuario_(u) {
 }
 
 function actualizarUsuario_(admin, datos) {
+  if (datos.estado === 'rechazado') return eliminarUsuario_(admin, datos);   // compatibilidad: rechazar = eliminar
   var email = String(datos.email || '').toLowerCase().trim();
   var propietario = PropertiesService.getScriptProperties().getProperty('PROPIETARIO');
   if (email === propietario) throw error_('NO_PERMITIDO', 'No se puede modificar al propietario de la hoja.');
@@ -360,8 +396,40 @@ function actualizarUsuario_(admin, datos) {
   } finally { lock.releaseLock(); }
 
   bitacora_(admin.email, 'usuario', '', email + ' → ' + u.estado + ' / ' + u.rol);
-  if (antes !== 'aprobado' && u.estado === 'aprobado') notificarAprobacion_(u);
+  if (antes !== 'aprobado' && u.estado === 'aprobado') {
+    compartirArchivos_(u.email, true);
+    notificarAprobacion_(u);
+  }
   return { ok: true, usuarios: leerUsuarios_().map(publico_) };
+}
+
+/** Rechaza una solicitud o revoca un acceso: la cuenta se elimina de la lista y pierde su sesión de inmediato. */
+function eliminarUsuario_(admin, datos) {
+  var email = String(datos.email || '').toLowerCase().trim();
+  var propietario = PropertiesService.getScriptProperties().getProperty('PROPIETARIO');
+  if (email === propietario) throw error_('NO_PERMITIDO', 'No se puede eliminar al propietario de la hoja.');
+  if (email === admin.email) throw error_('NO_PERMITIDO', 'No puede eliminar su propia cuenta.');
+  var lock = LockService.getScriptLock();
+  if (!lock.tryLock(20000)) throw error_('OCUPADO', 'El servidor está ocupado; intente de nuevo.');
+  var u;
+  try {
+    u = buscarUsuario_(email);
+    if (!u) throw error_('NO_EXISTE', 'No existe el usuario ' + email + '.');
+    hojaUsuarios_().deleteRow(u._fila);
+  } finally { lock.releaseLock(); }
+  if (u.estado === 'aprobado') compartirArchivos_(email, false);
+  bitacora_(admin.email, u.estado === 'aprobado' ? 'revocar acceso' : 'rechazar solicitud', '', email + ' (eliminado de la lista)');
+  return { ok: true, usuarios: leerUsuarios_().map(publico_) };
+}
+
+/** Elimina filas con estado «rechazado» (versiones anteriores las conservaban). */
+function purgarRechazados_(quien) {
+  var h = hojaUsuarios_();
+  var rechazados = leerUsuarios_().filter(function (x) { return x.estado === 'rechazado'; });
+  rechazados.sort(function (a, b) { return b._fila - a._fila; }).forEach(function (x) {
+    h.deleteRow(x._fila);
+    bitacora_(quien, 'rechazar solicitud', '', x.email + ' (eliminado de la lista)');
+  });
 }
 
 /* -----------------------------------------------------------------------------
@@ -394,7 +462,59 @@ function obtenerRegistro_(datos) {
   var folio = String(datos.folio || '').toUpperCase().trim();
   var x = leerRegistros_().filter(function (y) { return y.registro.folio === folio; })[0];
   if (!x) throw error_('NO_EXISTE', 'No existe el folio ' + folio + '.');
+  var idn = leerIdentificacion_(folio);
+  if (idn) EVC.camposIdentificacion().forEach(function (c) { x.registro[c.id] = idn.datos[c.id] || null; });
   return { ok: true, registro: x.registro, version: x.registro.fecha_modificacion || '' };
+}
+
+/* -----------------------------------------------------------------------------
+ * Datos de localización del paciente (hoja «Identificacion», separada de «Datos»)
+ * --------------------------------------------------------------------------- */
+function hojaIdent_() {
+  var ss = libro_();
+  var h = ss.getSheetByName(HOJA_IDENT);
+  if (!h) {
+    h = ss.insertSheet(HOJA_IDENT);
+    asegurarEncabezados_(h, colsIdent_());
+    h.setTabColor('#b42318');
+  }
+  return h;
+}
+
+function leerIdentificacion_(folio) {
+  var h = hojaIdent_();
+  var lr = h.getLastRow();
+  if (lr < 2) return null;
+  var vals = h.getRange(1, 1, lr, h.getLastColumn()).getValues();
+  var enc = vals[0].map(function (x) { return String(x).trim(); });
+  var iF = enc.indexOf('folio');
+  for (var i = 1; i < vals.length; i++) {
+    if (String(vals[i][iF]).toUpperCase().trim() !== folio) continue;
+    var d = {};
+    enc.forEach(function (n, j) { if (n) d[n] = vals[i][j] === '' ? null : String(vals[i][j]); });
+    return { fila: i + 1, datos: d, valores: vals[i] };
+  }
+  return null;
+}
+
+function guardarIdentificacion_(r, email, ahora) {
+  var ids = EVC.camposIdentificacion();
+  var previo = leerIdentificacion_(r.folio);
+  if (!previo && ids.every(function (c) { return EVC.vacio(r[c.id]); })) return;   // nada que guardar
+  var h = hojaIdent_();
+  var enc = asegurarEncabezados_(h, colsIdent_());
+  var fila = previo ? previo.fila : Math.max(h.getLastRow(), 1) + 1;
+  asegurarTamano_(h, fila, enc.length);
+  var valores = enc.map(function (n, j) {
+    if (n === 'folio') return r.folio;
+    if (n === 'modificado_por') return email;
+    if (n === 'fecha_modificacion') return ahora;
+    if (EVC.campo(n) && EVC.campo(n).identificador) return aCelda_(EVC.campo(n), r[n]);
+    return previo && j < previo.valores.length ? previo.valores[j] : '';
+  });
+  var rango = h.getRange(fila, 1, 1, enc.length);
+  rango.setNumberFormat('@');   // texto: conserva ceros a la izquierda del NSS y del teléfono
+  rango.setValues([valores]);
 }
 
 function guardarRegistro_(u, datos) {
@@ -420,7 +540,8 @@ function guardarRegistro_(u, datos) {
     r.fecha_modificacion = ahora;
 
     var fila = previo ? previo.fila : Math.max(hoja.getLastRow(), 1) + 1;
-    escribirRegistro_(hoja, enc, fila, r, previo ? previo.valores : null);
+    escribirRegistro_(hoja, enc, fila, r, previo ? previo.valores : null);   // sólo columnas de «Datos»
+    guardarIdentificacion_(r, u.email, ahora);                               // nombre, NSS, teléfono → «Identificacion»
     bitacora_(u.email, previo ? 'editar' : 'crear', r.folio, prep.advertencias.length ? prep.advertencias.length + ' advertencia(s)' : '');
   } finally { lock.releaseLock(); }
 
@@ -520,6 +641,179 @@ function darFormatoDatos_(hoja) {
     if (c.opciones) nota += '\n' + c.opciones.map(function (o) { return o[0] + ' = ' + o[1]; }).join('\n');
     return nota;
   })]);
+}
+
+/* -----------------------------------------------------------------------------
+ * Archivos adjuntos: carpeta «Cédula EVC - Archivos por registro» / <folio>
+ *
+ * El navegador envía el archivo en fragmentos de 4 MB; este script los pasa a
+ * una «subida reanudable» de Google Drive. Así se admiten videos grandes y el
+ * token de acceso del propietario nunca sale del servidor.
+ * --------------------------------------------------------------------------- */
+var MIME_POR_EXT = {
+  pdf: 'application/pdf', jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp',
+  heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp', tif: 'image/tiff', tiff: 'image/tiff',
+  mp4: 'video/mp4', mov: 'video/quicktime', m4v: 'video/x-m4v', '3gp': 'video/3gpp', '3g2': 'video/3gpp2',
+  webm: 'video/webm', avi: 'video/x-msvideo', mkv: 'video/x-matroska'
+};
+
+function carpetaRaiz_(crear) {
+  var props = PropertiesService.getScriptProperties();
+  var id = props.getProperty('ARCHIVOS_CARPETA');
+  if (id) {
+    try { var f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) { /* se borró: se crea otra */ }
+  }
+  if (!crear) return null;
+  var padres = DriveApp.getFileById(libro_().getId()).getParents();
+  var padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
+  var carpeta = padre.createFolder(CARPETA_ARCHIVOS);
+  carpeta.setDescription('Archivos adjuntos de la cédula EVC/NLR: una subcarpeta por folio. Información confidencial.');
+  props.setProperty('ARCHIVOS_CARPETA', carpeta.getId());
+  return carpeta;
+}
+
+function carpetaFolio_(folio, crear) {
+  var raiz = carpetaRaiz_(crear);
+  if (!raiz) return null;
+  var it = raiz.getFoldersByName(folio);
+  while (it.hasNext()) { var c = it.next(); if (!c.isTrashed()) return c; }
+  return crear ? raiz.createFolder(folio) : null;
+}
+
+/** Da (o quita) permiso de lectura de la carpeta de archivos a un usuario aprobado. */
+function compartirArchivos_(email, dar) {
+  try {
+    var raiz = carpetaRaiz_(dar);
+    if (!raiz) return;
+    if (dar) raiz.addViewer(email); else raiz.removeViewer(email);
+  } catch (e) { console.warn('Carpeta de archivos (' + email + '): ' + e); }
+}
+
+function describirArchivo_(f) {
+  var m = /Subido por (\S+)/.exec(String(f.getDescription() || ''));
+  return { id: f.getId(), nombre: f.getName(), tipo: f.getMimeType(), tamano: f.getSize(),
+    fecha: Utilities.formatDate(f.getDateCreated(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss'),
+    url: f.getUrl(), subidoPor: m ? m[1] : '' };
+}
+
+function listarArchivos_(datos) {
+  var folio = String(datos.folio || '').toUpperCase().trim();
+  var c = carpetaFolio_(folio, false);
+  var out = [];
+  if (c) {
+    var it = c.getFiles();
+    while (it.hasNext()) { var f = it.next(); if (!f.isTrashed()) out.push(describirArchivo_(f)); }
+  }
+  out.sort(function (a, b) { return a.fecha < b.fecha ? 1 : -1; });
+  return { ok: true, archivos: out, carpetaUrl: c ? c.getUrl() : null };
+}
+
+function tipoArchivo_(tipo, nombre) {
+  tipo = String(tipo || '').toLowerCase();
+  if (tipo === 'application/pdf' || (/^image\//.test(tipo) && tipo.indexOf('svg') < 0) || /^video\//.test(tipo)) return tipo;
+  var m = /\.([a-z0-9]+)$/i.exec(nombre || '');
+  return m && MIME_POR_EXT[m[1].toLowerCase()] ? MIME_POR_EXT[m[1].toLowerCase()] : null;
+}
+
+function limpiarNombre_(n) {
+  var s = String(n || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').trim().slice(0, 150);
+  return s || 'archivo';
+}
+
+function cabecera_(resp, nombre) {
+  var h = resp.getAllHeaders ? resp.getAllHeaders() : resp.getHeaders();
+  for (var k in h) if (k.toLowerCase() === nombre) return Array.isArray(h[k]) ? h[k][0] : h[k];
+  return null;
+}
+
+function iniciarSubida_(u, datos) {
+  var folio = String(datos.folio || '').toUpperCase().trim();
+  if (!leerRegistros_().some(function (x) { return x.registro.folio === folio; }))
+    throw error_('NO_EXISTE', 'Guarde el registro ' + folio + ' antes de adjuntar archivos.');
+  var nombre = limpiarNombre_(datos.nombre);
+  var tipo = tipoArchivo_(datos.tipo, nombre);
+  if (!tipo) throw error_('VALIDACION', 'Tipo de archivo no permitido («' + nombre + '»): sólo PDF, fotos o videos.');
+  var total = Number(datos.tamano);
+  if (!(total > 0)) throw error_('VALIDACION', 'El archivo «' + nombre + '» está vacío.');
+  if (total > MAX_BYTES_ARCHIVO) throw error_('VALIDACION', '«' + nombre + '» supera el máximo de ' + Math.round(MAX_BYTES_ARCHIVO / 1048576) + ' MB.');
+  var carpeta = carpetaFolio_(folio, true);
+  var resp = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id', {
+    method: 'post',
+    contentType: 'application/json; charset=UTF-8',
+    payload: JSON.stringify({ name: nombre, parents: [carpeta.getId()], mimeType: tipo, description: 'Subido por ' + u.email + ' · ' + folio }),
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken(), 'X-Upload-Content-Type': tipo, 'X-Upload-Content-Length': String(total) },
+    muteHttpExceptions: true
+  });
+  var url = cabecera_(resp, 'location');
+  if (resp.getResponseCode() !== 200 || !url) {
+    console.error('Drive (iniciar subida): ' + resp.getResponseCode() + ' ' + resp.getContentText());
+    throw error_('ERROR_DRIVE', 'Google Drive no aceptó la subida (código ' + resp.getResponseCode() + ').');
+  }
+  var id = Utilities.getUuid().replace(/-/g, '');
+  CacheService.getScriptCache().put('U_' + id, JSON.stringify({ url: url, folio: folio, email: u.email, total: total, nombre: nombre }), 21600);
+  return { ok: true, id: id, fragmento: TAM_FRAGMENTO };
+}
+
+function subidaPendiente_(u, id) {
+  var raw = CacheService.getScriptCache().get('U_' + String(id || ''));
+  var s = raw ? JSON.parse(raw) : null;
+  if (!s || s.email !== u.email) throw error_('SUBIDA_INVALIDA', 'La subida expiró o no existe; vuelva a intentarlo.');
+  return s;
+}
+
+function subirFragmento_(u, datos) {
+  var s = subidaPendiente_(u, datos.id);
+  var bytes = Utilities.base64Decode(String(datos.datos || ''));
+  var ini = Number(datos.offset);
+  var fin = ini + bytes.length - 1;
+  if (!bytes.length || !(ini >= 0) || fin >= s.total) throw error_('VALIDACION', 'Fragmento de archivo inválido.');
+  var r = UrlFetchApp.fetch(s.url, {
+    method: 'put', payload: bytes, contentType: 'application/octet-stream',
+    headers: { 'Content-Range': 'bytes ' + ini + '-' + fin + '/' + s.total },
+    muteHttpExceptions: true, followRedirects: false
+  });
+  return resultadoSubida_(u, datos.id, s, r);
+}
+
+/** Pregunta a Drive cuántos bytes recibió (para reanudar tras un corte de red). */
+function estadoSubida_(u, datos) {
+  var s = subidaPendiente_(u, datos.id);
+  var r = UrlFetchApp.fetch(s.url, {
+    method: 'put', headers: { 'Content-Range': 'bytes */' + s.total }, muteHttpExceptions: true, followRedirects: false
+  });
+  return resultadoSubida_(u, datos.id, s, r);
+}
+
+function resultadoSubida_(u, id, s, r) {
+  var code = r.getResponseCode();
+  if (code === 308) {
+    var m = /bytes=0-(\d+)/.exec(cabecera_(r, 'range') || '');
+    return { ok: true, completo: false, recibido: m ? Number(m[1]) + 1 : 0 };
+  }
+  if (code === 200 || code === 201) {
+    CacheService.getScriptCache().remove('U_' + id);
+    var f = DriveApp.getFileById(JSON.parse(r.getContentText()).id);
+    bitacora_(u.email, 'adjuntar archivo', s.folio, s.nombre + ' (' + Math.max(1, Math.round(s.total / 1024)) + ' KB)');
+    return { ok: true, completo: true, archivo: describirArchivo_(f) };
+  }
+  console.error('Drive (fragmento): ' + code + ' ' + r.getContentText());
+  throw error_('ERROR_DRIVE', 'Google Drive respondió con el código ' + code + '. Intente de nuevo.');
+}
+
+/** Envía un adjunto a la papelera de Drive (recuperable 30 días). */
+function eliminarArchivo_(u, datos) {
+  var folio = String(datos.folio || '').toUpperCase().trim();
+  var c = carpetaFolio_(folio, false);
+  var f = null;
+  try { f = DriveApp.getFileById(String(datos.id || '')); } catch (e) { f = null; }
+  var dentro = false;
+  if (c && f) { var ps = f.getParents(); while (ps.hasNext()) if (ps.next().getId() === c.getId()) dentro = true; }
+  if (!dentro || f.isTrashed()) throw error_('NO_EXISTE', 'El archivo no pertenece a este registro.');
+  var info = describirArchivo_(f);
+  if (!esAdmin_(u) && info.subidoPor !== u.email) throw error_('NO_PERMITIDO', 'Sólo quien subió el archivo o un administrador puede eliminarlo.');
+  f.setTrashed(true);
+  bitacora_(u.email, 'eliminar archivo', folio, info.nombre + ' (a la papelera de Drive)');
+  return listarArchivos_({ folio: folio });
 }
 
 /* -----------------------------------------------------------------------------

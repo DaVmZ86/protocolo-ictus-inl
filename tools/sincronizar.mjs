@@ -34,12 +34,12 @@ const celda = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\n/g, ' ');
 let md = `# Diccionario de variables\n\n`;
 md += `Protocolo **${esq.protocolo}** — *${esq.titulo}*.\n\n`;
 md += `Esquema v${esq.version}. Archivo generado automáticamente por \`tools/sincronizar.mjs\` a partir de \`docs/js/esquema.js\`; no lo edite a mano.\n\n`;
-md += `- Columnas en la hoja **Datos** de Google Sheets y variables en SPSS: **${EVC.campos().length}** (+ 4 columnas de control: creado_por, fecha_creacion, modificado_por, fecha_modificacion, que no se exportan a SPSS).\n`;
+md += `- Columnas en la hoja **Datos** de Google Sheets y variables en SPSS: **${EVC.camposAnalisis().length}** (+ 4 columnas de control: creado_por, fecha_creacion, modificado_por, fecha_modificacion, que no se exportan a SPSS).\n`;
 md += `- Valores vacíos = dato no disponible (perdido del sistema en SPSS).\n`;
 md += `- Variables *calculadas*: las genera la aplicación; no se capturan.\n\n`;
 for (const s of esq.secciones) {
   md += `## ${s.titulo}\n\n| Variable | Etiqueta | Tipo | Nivel SPSS | Formato SPSS | Códigos / unidades / reglas |\n|---|---|---|---|---|---|\n`;
-  for (const c of s.campos) {
+  for (const c of s.campos.filter((x) => !x.identificador)) {
     const reglas = [];
     if (c.opciones) reglas.push(c.opciones.map((o) => `${o[0]} = ${o[1]}`).join('; '));
     if (c.unidad) reglas.push(`Unidad: ${c.unidad}`);

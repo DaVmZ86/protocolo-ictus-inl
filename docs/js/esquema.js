@@ -58,9 +58,12 @@ var EVC = (function () {
   //   fila .......... ocupa toda la fila en el formulario
   //   grupo ......... subtítulo que se muestra antes del campo
   //   asistente ..... nihss | mrs  (abre una calculadora de apoyo)
+  //   identificador . true = dato de localización del paciente: se guarda aparte
+  //                   (hoja «Identificacion») y NUNCA se exporta ni entra a «Datos»
+  //   mayusculas / soloDigitos / telefono  normalizaciones y ayudas de captura
   // ---------------------------------------------------------------------------
   var ESQUEMA = {
-    version: '1.0.0',
+    version: '1.1.0',
     protocolo: 'PI-2026-7694',
     titulo: 'Asociación del índice neutrófilo/linfocito con la dependencia funcional a los 90 días en pacientes con evento cerebrovascular isquémico agudo',
     sede: 'HGZ/MF No. 12, Lázaro Cárdenas, Michoacán',
@@ -74,10 +77,18 @@ var EVC = (function () {
         campos: [
           { id: 'folio', etiqueta: 'Folio del participante', tipo: 'texto', requerido: true, longitud: 12, nivel: 'nominal',
             patron: '^EVC-[0-9]{3,4}$', mensajePatron: 'use el formato EVC-001',
-            ayuda: 'Código consecutivo (EVC-001, EVC-002…). No capture nombre, NSS, domicilio ni teléfono del paciente.' },
+            ayuda: 'Código consecutivo (EVC-001, EVC-002…). Es el único identificador que llega a la base de análisis.' },
           { id: 'fecha_llenado', etiqueta: 'Fecha de llenado', tipo: 'fecha', nivel: 'escala' },
           { id: 'fase', etiqueta: 'Fase del estudio', tipo: 'opcion', requerido: true, nivel: 'nominal',
-            opciones: [[1, 'Retrospectiva (2023–2025)'], [2, 'Prospectiva (a partir de 2026)']] }
+            opciones: [[1, 'Retrospectiva (2023–2025)'], [2, 'Prospectiva (a partir de 2026)']] },
+          // Datos de localización: se guardan en la hoja «Identificacion», nunca en «Datos» ni en SPSS.
+          { id: 'nombre_paciente', etiqueta: 'Nombre del paciente', tipo: 'texto', longitud: 120, identificador: true, mayusculas: true, fila: true,
+            grupo: 'Datos de localización — confidenciales, no se exportan',
+            ayuda: 'Inicie por apellidos: apellido paterno, apellido materno y nombre(s).' },
+          { id: 'nss', etiqueta: 'Número de Seguridad Social (NSS)', tipo: 'texto', longitud: 11, identificador: true, soloDigitos: true,
+            patron: '^[0-9]{11}$', mensajePatron: 'debe tener 11 dígitos', ayuda: '11 dígitos, sin guiones ni espacios.' },
+          { id: 'telefono', etiqueta: 'Teléfono de contacto', tipo: 'texto', longitud: 80, identificador: true, telefono: true, opcional: true,
+            ayuda: 'Paciente o familiar responsable, 10 dígitos. Puede anotar de quién es, p. ej. «7531234567 hija».' }
         ]
       },
       {
@@ -298,7 +309,27 @@ var EVC = (function () {
 
   function campos() { return PLANOS.slice(); }
   function campo(id) { return POR_ID[id] || null; }
-  function columnas() { return PLANOS.map(function (c) { return c.id; }); }
+  // Variables de análisis (hoja «Datos» y SPSS): todo excepto los datos de localización
+  function camposAnalisis() { return PLANOS.filter(function (c) { return !c.identificador; }); }
+  function camposIdentificacion() { return PLANOS.filter(function (c) { return c.identificador; }); }
+  function columnas() { return camposAnalisis().map(function (c) { return c.id; }); }
+  function sinIdentificadores(r) {
+    var o = {};
+    Object.keys(r || {}).forEach(function (k) { if (!(POR_ID[k] && POR_ID[k].identificador)) o[k] = r[k]; });
+    return o;
+  }
+  // Dígito verificador del NSS del IMSS (algoritmo de Luhn sobre los 11 dígitos)
+  function nssValido(nss) {
+    if (!/^\d{11}$/.test(String(nss || ''))) return false;
+    var suma = 0;
+    for (var i = 0; i < 11; i++) {
+      var d = Number(nss.charAt(10 - i));
+      if (i % 2 === 1) { d *= 2; if (d > 9) d -= 9; }
+      suma += d;
+    }
+    return suma % 10 === 0;
+  }
+  function telefonos(texto) { return (String(texto || '').replace(/[\s().-]/g, '').match(/\d{10}/g) || []); }
 
   // ---------------------------------------------------------------------------
   // Utilidades de fechas (cadenas ISO aaaa-mm-dd y hh:mm, sin zonas horarias)
@@ -398,7 +429,11 @@ var EVC = (function () {
       } else if (c.tipo === 'fecha' || c.tipo === 'hora') {
         r[c.id] = String(v).trim();
       } else {
-        r[c.id] = String(v).trim().slice(0, c.longitud || 255);
+        var s = String(v).trim();
+        if (c.tipo === 'texto') s = s.replace(/\s+/g, ' ');
+        if (c.soloDigitos) s = s.replace(/\D/g, '');
+        if (c.mayusculas) s = s.toUpperCase();
+        r[c.id] = s === '' ? null : s.slice(0, c.longitud || 255);
       }
     });
     if (r.folio) r.folio = r.folio.toUpperCase();
@@ -440,6 +475,10 @@ var EVC = (function () {
           if (c.patron && !new RegExp(c.patron).test(v)) e(c, c.mensajePatron || 'formato no válido');
       }
     });
+
+    // --- Datos de localización ---
+    if (r.nss && /^\d{11}$/.test(r.nss) && !nssValido(r.nss)) a('nss', 'El NSS no pasa la verificación del dígito verificador; revíselo contra el expediente.');
+    if (r.telefono && !telefonos(r.telefono).length) a('telefono', 'No se encontró un teléfono de 10 dígitos.');
 
     // --- Consistencia clínica y del protocolo (no impiden guardar) ---
     if (esNum(r.edad) && r.inc1_edad18 === 1 && r.edad < 18) a('inc1_edad18', 'Criterio 1 marcado «Sí» pero la edad es menor de 18 años.');
@@ -549,7 +588,12 @@ var EVC = (function () {
     MRS_ENTREVISTA: MRS_ENTREVISTA,
     campos: campos,
     campo: campo,
+    camposAnalisis: camposAnalisis,
+    camposIdentificacion: camposIdentificacion,
     columnas: columnas,
+    sinIdentificadores: sinIdentificadores,
+    nssValido: nssValido,
+    telefonos: telefonos,
     esVisible: esVisible,
     calcularDerivadas: calcularDerivadas,
     limpiarOcultos: limpiarOcultos,

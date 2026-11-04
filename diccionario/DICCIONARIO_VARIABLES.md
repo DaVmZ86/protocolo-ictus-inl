@@ -2,7 +2,7 @@
 
 Protocolo **PI-2026-7694** — *Asociación del índice neutrófilo/linfocito con la dependencia funcional a los 90 días en pacientes con evento cerebrovascular isquémico agudo*.
 
-Esquema v1.0.0. Archivo generado automáticamente por `tools/sincronizar.mjs` a partir de `docs/js/esquema.js`; no lo edite a mano.
+Esquema v1.1.0. Archivo generado automáticamente por `tools/sincronizar.mjs` a partir de `docs/js/esquema.js`; no lo edite a mano.
 
 - Columnas en la hoja **Datos** de Google Sheets y variables en SPSS: **75** (+ 4 columnas de control: creado_por, fecha_creacion, modificado_por, fecha_modificacion, que no se exportan a SPSS).
 - Valores vacíos = dato no disponible (perdido del sistema en SPSS).
@@ -12,7 +12,7 @@ Esquema v1.0.0. Archivo generado automáticamente por `tools/sincronizar.mjs` a 
 
 | Variable | Etiqueta | Tipo | Nivel SPSS | Formato SPSS | Códigos / unidades / reglas |
 |---|---|---|---|---|---|
-| `folio` | Folio del participante | Texto | NOMINAL | A12 | Obligatoria. Código consecutivo (EVC-001, EVC-002…). No capture nombre, NSS, domicilio ni teléfono del paciente. |
+| `folio` | Folio del participante | Texto | NOMINAL | A12 | Obligatoria. Código consecutivo (EVC-001, EVC-002…). Es el único identificador que llega a la base de análisis. |
 | `fecha_llenado` | Fecha de llenado | Fecha | SCALE | SDATE10 |  |
 | `fase` | Fase del estudio | Categórica | NOMINAL | F2.0 | 1 = Retrospectiva (2023–2025); 2 = Prospectiva (a partir de 2026). Obligatoria |
 

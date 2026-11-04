@@ -49,6 +49,66 @@ class Hoja {
     if (vals.length > this.maxCols) this.maxCols = vals.length;
     this.getRange(r, 1, 1, vals.length).setValues([vals]);
   }
+  deleteRow(r) {
+    assert.ok(r >= 1 && r <= this.maxFilas, 'deleteRow fuera de rango');
+    this.celdas.splice(r - 1, 1);
+    const f = {};
+    for (const [k, v] of Object.entries(this.formatos)) {
+      const [fr, fc] = k.split(',').map(Number);
+      if (fr < r) f[k] = v; else if (fr > r) f[`${fr - 1},${fc}`] = v;
+    }
+    this.formatos = f;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Simulación de Google Drive (carpetas, archivos y subida reanudable)
+// ---------------------------------------------------------------------------
+let siguienteId = 1;
+const iter = (arr) => { let i = 0; return { hasNext: () => i < arr.length, next: () => arr[i++] }; };
+class Carpeta {
+  constructor(nombre, padre) { this.id = 'carpeta-' + siguienteId++; this.nombre = nombre; this.padre = padre; this.carpetas = []; this.archivos = []; this.lectores = new Set(); this.papelera = false; }
+  getId() { return this.id; } getName() { return this.nombre; } getUrl() { return 'https://drive.google.com/drive/folders/' + this.id; }
+  isTrashed() { return this.papelera; } setDescription() { return this; }
+  createFolder(n) { const c = new Carpeta(n, this); this.carpetas.push(c); DRIVE.carpetas[c.id] = c; return c; }
+  getFoldersByName(n) { return iter(this.carpetas.filter((c) => c.nombre === n)); }
+  getFiles() { return iter(this.archivos.slice()); }
+  addViewer(e) { this.lectores.add(e); return this; } removeViewer(e) { this.lectores.delete(e); return this; }
+}
+class Archivo {
+  constructor(nombre, tipo, desc, padre, tamano) { this.id = 'archivo-' + siguienteId++; Object.assign(this, { nombre, tipo, desc, padre, tamano }); this.papelera = false; this.creado = new Date(); }
+  getId() { return this.id; } getName() { return this.nombre; } getMimeType() { return this.tipo; } getSize() { return this.tamano; }
+  getDateCreated() { return this.creado; } getUrl() { return 'https://drive.google.com/file/d/' + this.id; } getDescription() { return this.desc; }
+  getParents() { return iter([this.padre]); } isTrashed() { return this.papelera; } setTrashed(v) { this.papelera = v; return this; }
+}
+const DRIVE = { raiz: null, carpetas: {}, archivos: {}, sesiones: {} };
+DRIVE.raiz = new Carpeta('Mi unidad', null);
+const respuesta = (code, cuerpo, cabeceras) => ({ getResponseCode: () => code, getContentText: () => cuerpo || '', getAllHeaders: () => cabeceras || {} });
+function driveSubida(url, opc) {
+  if (url.startsWith('https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable')) {
+    assert.equal(opc.method, 'post');
+    assert.match(opc.headers.Authorization, /^Bearer /);
+    const meta = JSON.parse(opc.payload);
+    const s = 'sesion-' + siguienteId++;
+    DRIVE.sesiones[s] = { meta, total: Number(opc.headers['X-Upload-Content-Length']), recibido: 0 };
+    return respuesta(200, '', { Location: 'https://upload.prueba/' + s });
+  }
+  const s = DRIVE.sesiones[url.replace('https://upload.prueba/', '')];
+  assert.ok(s, 'sesión de subida inexistente');
+  assert.equal(opc.followRedirects, false, 'las subidas deben desactivar followRedirects para recibir el 308');
+  const cr = opc.headers['Content-Range'];
+  if (/^bytes \*\//.test(cr)) return s.recibido ? respuesta(308, '', { Range: 'bytes=0-' + (s.recibido - 1) }) : respuesta(308, '', {});
+  const [, a, b, t] = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(cr).map(Number);
+  assert.equal(a, s.recibido, 'los fragmentos deben llegar en orden');
+  assert.equal(b - a + 1, opc.payload.length, 'Content-Range coincide con el tamaño del fragmento');
+  assert.equal(t, s.total);
+  if (b + 1 < t) assert.equal((b - a + 1) % (256 * 1024), 0, 'los fragmentos intermedios deben ser múltiplos de 256 KB');
+  s.recibido = b + 1;
+  if (s.recibido < s.total) return respuesta(308, '', { Range: 'bytes=0-' + b });
+  const padre = DRIVE.carpetas[s.meta.parents[0]];
+  const f = new Archivo(s.meta.name, s.meta.mimeType, s.meta.description, padre, s.total);
+  padre.archivos.push(f); DRIVE.archivos[f.id] = f;
+  return respuesta(200, JSON.stringify({ id: f.id }));
 }
 class Rango {
   constructor(h, r, c, nr, nc) { Object.assign(this, { h, r, c, nr, nc }); }
@@ -101,6 +161,7 @@ function crearEntorno() {
   const libro = new Libro();
   const props = {};
   const correos = [];
+  const cache = new Map();
   const usuarioEfectivo = { email: PROPIETARIO };
   const formatear = (fecha, tz, fmt) => {
     const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
@@ -122,9 +183,19 @@ function crearEntorno() {
     }) },
     LockService: { getScriptLock: () => ({ tryLock: () => true, waitLock: () => {}, releaseLock: () => {} }) },
     Session: { getScriptTimeZone: () => TZ, getEffectiveUser: () => ({ getEmail: () => usuarioEfectivo.email }) },
-    Utilities: { getUuid: () => crypto.randomUUID(), formatDate: formatear },
+    Utilities: { getUuid: () => crypto.randomUUID(), formatDate: formatear, base64Decode: (s) => Array.from(Buffer.from(s, 'base64')) },
+    CacheService: { getScriptCache: () => ({ get: (k) => cache.get(k) ?? null, put: (k, v) => { cache.set(k, v); }, remove: (k) => { cache.delete(k); } }) },
+    DriveApp: {
+      getFileById: (id) => {
+        if (id === libro.getId()) return { getParents: () => iter([DRIVE.raiz]) };
+        if (!DRIVE.archivos[id]) throw new Error('No item with the given ID could be found');
+        return DRIVE.archivos[id];
+      },
+      getFolderById: (id) => { if (!DRIVE.carpetas[id]) throw new Error('No item with the given ID could be found'); return DRIVE.carpetas[id]; },
+      getRootFolder: () => DRIVE.raiz
+    },
     UrlFetchApp: { fetch: (url, opc) => {
-      assert.equal(url, 'https://oauth2.googleapis.com/tokeninfo');
+      if (url !== 'https://oauth2.googleapis.com/tokeninfo') return driveSubida(url, opc);
       const tok = opc.payload.id_token; // formato de prueba: "tok|correo|aud|verificado|vencido"
       const [marca, email, aud = CLIENT_ID, ver = 'true', venc = '0'] = tok.split('|');
       if (marca !== 'tok') return { getResponseCode: () => 400, getContentText: () => '{"error":"invalid_token"}' };
@@ -133,7 +204,7 @@ function crearEntorno() {
     } },
     MailApp: { sendEmail: (m) => correos.push(m) },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (s) => ({ setMimeType() { return this; }, getContent: () => s }) },
-    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/prueba/exec' }) },
+    ScriptApp: { getService: () => ({ getUrl: () => 'https://script.google.com/macros/s/prueba/exec' }), getOAuthToken: () => 'token-propietario' },
     Logger: { log() {} }
   };
   vm.createContext(ctx);
@@ -159,10 +230,14 @@ console.log(`Zona horaria de la prueba: ${TZ}`);
 
 prueba('inicializar crea hojas, columnas y administrador', () => {
   ctx.inicializar();
-  assert.deepEqual(libro.hojas.map((h) => h.nombre).sort(), ['Bitacora', 'Datos', 'Usuarios']);
+  assert.deepEqual(libro.hojas.map((h) => h.nombre).sort(), ['Bitacora', 'Datos', 'Identificacion', 'Usuarios']);
   const enc = encabezado('Datos');
-  assert.equal(enc.length, EVC.campos().length + 4);
+  assert.equal(enc.length, EVC.camposAnalisis().length + 4);
   assert.equal(enc[0], 'folio');
+  for (const id of ['nombre_paciente', 'nss', 'telefono']) assert.ok(!enc.includes(id), id + ' no debe estar en «Datos»');
+  assert.deepEqual(encabezado('Identificacion'), ['folio', 'nombre_paciente', 'nss', 'telefono', 'modificado_por', 'fecha_modificacion']);
+  assert.ok(props.ARCHIVOS_CARPETA, 'se crea la carpeta de archivos');
+  assert.equal(DRIVE.carpetas[props.ARCHIVOS_CARPETA].nombre, 'Cédula EVC - Archivos por registro');
   assert.ok(hoja('Datos').maxCols >= enc.length);
   assert.equal(props.PROPIETARIO, PROPIETARIO);
   const usuarios = hoja('Usuarios').celdas;
@@ -173,8 +248,9 @@ prueba('inicializar crea hojas, columnas y administrador', () => {
 
 prueba('inicializar es idempotente', () => {
   ctx.inicializar();
-  assert.equal(encabezado('Datos').length, EVC.campos().length + 4);
+  assert.equal(encabezado('Datos').length, EVC.camposAnalisis().length + 4);
   assert.equal(hoja('Usuarios').getLastRow(), 2);
+  assert.equal(DRIVE.raiz.carpetas.length, 1, 'no duplica la carpeta de archivos');
 });
 
 prueba('doGet responde', () => {
@@ -235,10 +311,27 @@ prueba('el administrador aprueba al residente', () => {
   assert.equal(r.usuarios.find((u) => u.email === 'residente@gmail.com').estado, 'aprobado');
   assert.equal(correos.length, 2);
   assert.equal(correos[1].to, 'residente@gmail.com');
+  assert.ok(DRIVE.carpetas[props.ARCHIVOS_CARPETA].lectores.has('residente@gmail.com'), 'al aprobar puede ver la carpeta de archivos');
   assert.equal(post({ accion: 'actualizarUsuario', sesion: sesAdmin, datos: { email: PROPIETARIO, estado: 'rechazado' } }).error, 'NO_PERMITIDO');
+  assert.equal(post({ accion: 'eliminarUsuario', sesion: sesAdmin, datos: { email: PROPIETARIO } }).error, 'NO_PERMITIDO');
   assert.equal(post({ accion: 'actualizarUsuario', sesion: sesAdmin, datos: { email: 'residente@gmail.com', estado: 'jefe' } }).error, 'VALIDACION');
   assert.equal(post({ accion: 'listarUsuarios', sesion: sesCap }).error, 'NO_PERMITIDO');
   assert.equal(post({ accion: 'exportar', sesion: sesCap }).error, 'NO_PERMITIDO');
+  assert.equal(post({ accion: 'eliminarUsuario', sesion: sesCap, datos: { email: PROPIETARIO } }).error, 'NO_PERMITIDO');
+});
+
+prueba('rechazar una solicitud la elimina de la lista (y limpia «rechazado» antiguos)', () => {
+  post({ accion: 'login', datos: { idToken: 'tok|intruso@gmail.com' } });
+  // fila heredada de la versión anterior con estado «rechazado»
+  hoja('Usuarios').appendRow(['viejo@gmail.com', 'Viejo', 'rechazado', 'capturista', '', '', '', '']);
+  const antes = post({ accion: 'listarUsuarios', sesion: sesAdmin }).usuarios.map((u) => u.email).sort();
+  assert.deepEqual(antes, ['intruso@gmail.com', PROPIETARIO, 'residente@gmail.com'].sort(), 'los «rechazado» antiguos desaparecen');
+  const r = post({ accion: 'eliminarUsuario', sesion: sesAdmin, datos: { email: 'intruso@gmail.com' } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.deepEqual(r.usuarios.map((u) => u.email).sort(), [PROPIETARIO, 'residente@gmail.com'].sort());
+  assert.ok(hoja('Usuarios').celdas.every((f) => !f || !['intruso@gmail.com', 'viejo@gmail.com'].includes(f[0])));
+  assert.ok(hoja('Bitacora').celdas.some((f) => f && f[2] === 'rechazar solicitud' && String(f[4]).startsWith('intruso@gmail.com')));
+  assert.equal(post({ accion: 'eliminarUsuario', sesion: sesAdmin, datos: { email: 'nadie@gmail.com' } }).error, 'NO_EXISTE');
 });
 
 const ejemplo = {
@@ -252,7 +345,8 @@ const ejemplo = {
   fecha_muestra: '2026-05-01', hora_muestra: '02:00', leucocitos: 11.2, neutrofilos: 7.01, linfocitos: 2,
   plaquetas: 251, glucosa: 182.5, col_total: 190, hdl: 38, ldl: 120, trigliceridos: 160,
   trombolisis: 0, t_puerta_aguja: 45, fecha_egreso: '2026-05-08', mort_intrahosp: 0,
-  observaciones: '=SUMA(A1) texto que no debe ser fórmula', nlr: 99, dictamen: 3, campo_inventado: 'x'
+  observaciones: '=SUMA(A1) texto que no debe ser fórmula', nlr: 99, dictamen: 3, campo_inventado: 'x',
+  nombre_paciente: 'PÉREZ LÓPEZ JUANA', nss: '04169512345', telefono: '7531234567 hija'
 };
 
 let version;
@@ -289,6 +383,20 @@ prueba('la fila en «Datos» tiene tipos correctos (fechas reales, horas como te
   assert.equal(col('observaciones'), '=SUMA(A1) texto que no debe ser fórmula');
   assert.equal(col('fecha_modificacion'), version);
   assert.equal(hoja('Datos').formatos[`2,${enc.indexOf('hora_inicio') + 1}`], '@');
+  assert.ok(!JSON.stringify(hoja('Datos').celdas).includes('PÉREZ'), 'el nombre no llega a «Datos»');
+});
+
+prueba('nombre, NSS y teléfono se guardan aparte, en «Identificacion»', () => {
+  const enc = encabezado('Identificacion');
+  const fila = hoja('Identificacion').celdas[1];
+  const col = (n) => fila[enc.indexOf(n)];
+  assert.equal(col('folio'), 'EVC-001');
+  assert.equal(col('nombre_paciente'), 'PÉREZ LÓPEZ JUANA');
+  assert.equal(col('nss'), '04169512345', 'conserva el cero inicial');
+  assert.equal(col('telefono'), '7531234567 hija');
+  assert.equal(col('modificado_por'), 'residente@gmail.com');
+  const l = post({ accion: 'listarRegistros', sesion: sesCap });
+  assert.ok(!JSON.stringify(l).includes('PÉREZ') && !JSON.stringify(l).includes('04169512345'), 'la lista no expone identificadores');
 });
 
 prueba('obtenerRegistro devuelve exactamente lo guardado', () => {
@@ -334,28 +442,84 @@ prueba('registro no incluido y lista con resumen', () => {
   const l = post({ accion: 'listarRegistros', sesion: sesCap });
   assert.equal(l.registros.length, 2);
   const r2 = l.registros.find((x) => x.folio === 'EVC-002');
-  assert.equal(r2.completitud, 33, 'sólo cuenta identificación y criterios cuando no se incluye');
+  assert.equal(r2.completitud, 29, 'sólo cuenta identificación y criterios cuando no se incluye');
   assert.equal(EVC.estadoSeguimiento(l.registros.find((x) => x.folio === 'EVC-001'), '2026-08-01').codigo, 'completo');
 });
 
 prueba('exportar (admin) + CSV + sintaxis SPSS', () => {
   const r = post({ accion: 'exportar', sesion: sesAdmin });
   assert.equal(r.registros.length, 2);
+  for (const reg of r.registros) for (const id of ['nombre_paciente', 'nss', 'telefono']) assert.ok(!(id in reg), 'exportar no incluye ' + id);
+  assert.ok(!JSON.stringify(r).includes('PÉREZ') && !JSON.stringify(r).includes('04169512345'));
   const spssCtx = vm.createContext({});
   vm.runInContext(fs.readFileSync(path.join(raiz, 'docs/js/esquema.js'), 'utf8'), spssCtx);
   vm.runInContext(fs.readFileSync(path.join(raiz, 'docs/js/spss.js'), 'utf8'), spssCtx);
   const csv = spssCtx.EVC_SPSS.generarCsv(r.registros).trim().split('\r\n');
   assert.equal(csv.length, 3);
   const enc = csv[0].split(',');
-  assert.equal(enc.length, EVC.campos().length);
+  assert.equal(enc.length, EVC.camposAnalisis().length);
+  assert.ok(!enc.includes('nss') && !enc.includes('nombre_paciente') && !enc.includes('telefono'));
   const fila1 = csv[1];
   assert.ok(fila1.startsWith('"EVC-001",2026/05/02,2,'), fila1.slice(0, 40));
   assert.ok(fila1.includes(',3.51,1,'), 'NLR con 2 decimales y categoría');
   assert.ok(fila1.includes(',23:15,'), 'hora como hh:mm');
   const sps = spssCtx.EVC_SPSS.generarSintaxis('base.csv');
   assert.ok(sps.includes("/FILE='base.csv'"));
-  for (const c of EVC.campos()) assert.ok(sps.includes('\n    ' + c.id + ' '), 'falta en GET DATA: ' + c.id);
+  for (const c of EVC.camposAnalisis()) assert.ok(sps.includes('\n    ' + c.id + ' '), 'falta en GET DATA: ' + c.id);
+  assert.ok(!/\b(nss|nombre_paciente|telefono)\b/.test(sps), 'la sintaxis no menciona identificadores');
   assert.ok(sps.split('\r\n').every((l) => l.length < 200), 'líneas de sintaxis cortas');
+});
+
+prueba('adjuntar archivos: subida por fragmentos a la carpeta del folio', () => {
+  const MB = 1024 * 1024;
+  const b64 = (n) => Buffer.alloc(n, 7).toString('base64');
+  assert.equal(post({ accion: 'iniciarSubida', sesion: sesCap, datos: { folio: 'EVC-999', nombre: 'a.pdf', tipo: 'application/pdf', tamano: 10 } }).error, 'NO_EXISTE');
+  assert.equal(post({ accion: 'iniciarSubida', sesion: sesCap, datos: { folio: 'EVC-001', nombre: 'virus.exe', tipo: 'application/x-msdownload', tamano: 10 } }).error, 'VALIDACION');
+  assert.equal(post({ accion: 'iniciarSubida', sesion: sesCap, datos: { folio: 'EVC-001', nombre: 'enorme.mp4', tipo: 'video/mp4', tamano: 300 * MB } }).error, 'VALIDACION');
+  // video de 10 MB con tipo vacío (iPhone .mov): se deduce por la extensión
+  const total = 10 * MB;
+  const ini = post({ accion: 'iniciarSubida', sesion: sesCap, datos: { folio: 'evc-001', nombre: 'exploración/neuro.mov', tipo: '', tamano: total } });
+  assert.equal(ini.ok, true, JSON.stringify(ini));
+  assert.equal(ini.fragmento % (256 * 1024), 0);
+  const intruso = post({ accion: 'subirFragmento', sesion: sesAdmin, datos: { id: ini.id, offset: 0, datos: b64(16) } });
+  assert.equal(intruso.error, 'SUBIDA_INVALIDA', 'otra cuenta no puede continuar la subida');
+  let r, off = 0;
+  while (off < total) {
+    const n = Math.min(ini.fragmento, total - off);
+    r = post({ accion: 'subirFragmento', sesion: sesCap, datos: { id: ini.id, offset: off, datos: b64(n) } });
+    assert.equal(r.ok, true, JSON.stringify(r));
+    off += n;
+    if (off < total) {
+      assert.equal(r.completo, false); assert.equal(r.recibido, off);
+      assert.equal(post({ accion: 'estadoSubida', sesion: sesCap, datos: { id: ini.id } }).recibido, off, 'se puede consultar el avance para reanudar');
+    }
+  }
+  assert.equal(r.completo, true);
+  assert.equal(r.archivo.nombre, 'exploración_neuro.mov');
+  assert.equal(r.archivo.tipo, 'video/quicktime');
+  assert.equal(r.archivo.tamano, total);
+  assert.equal(r.archivo.subidoPor, 'residente@gmail.com');
+  assert.equal(post({ accion: 'subirFragmento', sesion: sesCap, datos: { id: ini.id, offset: 0, datos: b64(16) } }).error, 'SUBIDA_INVALIDA', 'la subida terminada ya no admite fragmentos');
+  const carpeta = DRIVE.carpetas[props.ARCHIVOS_CARPETA].carpetas.find((c) => c.nombre === 'EVC-001');
+  assert.ok(carpeta, 'subcarpeta con el nombre del folio');
+  // un PDF pequeño subido por el administrador
+  const p = post({ accion: 'iniciarSubida', sesion: sesAdmin, datos: { folio: 'EVC-001', nombre: 'laboratorio.pdf', tipo: 'application/pdf', tamano: 2048 } });
+  assert.equal(post({ accion: 'subirFragmento', sesion: sesAdmin, datos: { id: p.id, offset: 0, datos: b64(2048) } }).completo, true);
+  const lista = post({ accion: 'listarArchivos', sesion: sesCap, datos: { folio: 'EVC-001' } });
+  assert.equal(lista.archivos.length, 2);
+  assert.ok(lista.carpetaUrl);
+  assert.equal(post({ accion: 'listarArchivos', sesion: sesCap, datos: { folio: 'EVC-002' } }).archivos.length, 0);
+  // permisos de borrado: sólo quien lo subió o un administrador
+  const pdf = lista.archivos.find((a) => a.nombre === 'laboratorio.pdf');
+  assert.equal(post({ accion: 'eliminarArchivo', sesion: sesCap, datos: { folio: 'EVC-001', id: pdf.id } }).error, 'NO_PERMITIDO');
+  assert.equal(post({ accion: 'eliminarArchivo', sesion: sesCap, datos: { folio: 'EVC-002', id: pdf.id } }).error, 'NO_EXISTE', 'no se puede borrar desde otro folio');
+  const video = lista.archivos.find((a) => a.nombre.endsWith('.mov'));
+  const tras = post({ accion: 'eliminarArchivo', sesion: sesCap, datos: { folio: 'EVC-001', id: video.id } });
+  assert.equal(tras.ok, true, JSON.stringify(tras));
+  assert.deepEqual(tras.archivos.map((a) => a.nombre), ['laboratorio.pdf']);
+  assert.equal(DRIVE.archivos[video.id].papelera, true, 'va a la papelera (recuperable)');
+  assert.equal(post({ accion: 'eliminarArchivo', sesion: sesAdmin, datos: { folio: 'EVC-001', id: pdf.id } }).ok, true);
+  assert.ok(hoja('Bitacora').celdas.some((f) => f && f[2] === 'adjuntar archivo' && f[3] === 'EVC-001'));
 });
 
 prueba('sesión vencida y cierre de sesión', () => {
@@ -371,8 +535,13 @@ prueba('revocar acceso surte efecto inmediato', () => {
   const a = post({ accion: 'login', datos: { idToken: 'tok|' + PROPIETARIO } }).sesion;
   const c = post({ accion: 'login', datos: { idToken: 'tok|residente@gmail.com' } }).sesion;
   assert.equal(post({ accion: 'listarRegistros', sesion: c }).ok, true);
-  post({ accion: 'actualizarUsuario', sesion: a, datos: { email: 'residente@gmail.com', estado: 'rechazado' } });
-  assert.equal(post({ accion: 'listarRegistros', sesion: c }).error, 'NO_APROBADO');
+  const r = post({ accion: 'eliminarUsuario', sesion: a, datos: { email: 'residente@gmail.com' } });
+  assert.equal(r.ok, true, JSON.stringify(r));
+  assert.ok(!r.usuarios.some((u) => u.email === 'residente@gmail.com'), 'ya no aparece en la lista');
+  assert.equal(post({ accion: 'listarRegistros', sesion: c }).error, 'SESION_INVALIDA', 'su sesión deja de servir');
+  assert.ok(!DRIVE.carpetas[props.ARCHIVOS_CARPETA].lectores.has('residente@gmail.com'), 'pierde acceso a la carpeta de archivos');
+  const otraVez = post({ accion: 'login', datos: { idToken: 'tok|residente@gmail.com' } });
+  assert.equal(otraVez.usuario.estado, 'pendiente', 'si vuelve a entrar, queda como nueva solicitud');
 });
 
 prueba('columnas nuevas del esquema se agregan sin perder datos', () => {

@@ -112,7 +112,9 @@
     FOLIO_DUPLICADO: 'Ya existe un registro con ese folio. Revisa el número o abre el registro existente.',
     CONFLICTO_VERSION: 'Otra persona modificó este registro mientras lo editabas. Tus cambios quedaron como borrador en este equipo; recarga el registro para continuar.',
     NO_EXISTE: 'El registro solicitado no existe.',
-    OCUPADO: 'El servidor está ocupado. Intenta de nuevo en unos segundos.'
+    OCUPADO: 'El servidor está ocupado. Intenta de nuevo en unos segundos.',
+    SUBIDA_INVALIDA: 'La subida del archivo expiró o se interrumpió. Vuelve a intentarlo.',
+    ERROR_DRIVE: 'Google Drive no aceptó el archivo. Intenta de nuevo en unos minutos.'
   };
   function mensajeError(e) {
     if (e && e.codigo && MENSAJES[e.codigo]) return MENSAJES[e.codigo];
@@ -145,6 +147,8 @@
   // Modo demostración (todo en este navegador)
   // ---------------------------------------------------------------------------
   const Demo = {
+    archivos: {},
+    subidas: {},
     leer(k, def) { const v = ls.leer('evc-demo:' + k); return v === null ? def : v; },
     escribir(k, v) { ls.escribir('evc-demo:' + k, v); },
     usuarios() {
@@ -204,7 +208,38 @@
           this.escribir('usuarios', us);
           return { ok: true, usuarios: us };
         }
-        case 'exportar': return { ok: true, registros: Object.values(regs) };
+        case 'eliminarUsuario': {
+          const us = this.usuarios();
+          const u = us.find((x) => x.email === d.email);
+          if (!u || u.propietario) throw new ErrorApi('NO_PERMITIDO', MENSAJES.NO_PERMITIDO);
+          const quedan = us.filter((x) => x !== u);
+          this.escribir('usuarios', quedan);
+          return { ok: true, usuarios: quedan };
+        }
+        case 'exportar': return { ok: true, registros: Object.values(regs).map(E.sinIdentificadores) };
+        // Archivos en modo demostración: sólo en memoria (desaparecen al recargar)
+        case 'listarArchivos': return { ok: true, archivos: (this.archivos[d.folio] || []).slice().reverse(), carpetaUrl: null };
+        case 'iniciarSubida': {
+          if (!regs[d.folio]) throw new ErrorApi('NO_EXISTE', 'Guarda el registro antes de adjuntar archivos.');
+          const id = 'demo-' + Date.now() + Math.random().toString(16).slice(2);
+          this.subidas[id] = { folio: d.folio, nombre: d.nombre, tipo: d.tipo, total: d.tamano, recibido: 0 };
+          return { ok: true, id, fragmento: 4 * 1024 * 1024 };
+        }
+        case 'subirFragmento': {
+          const s = this.subidas[d.id];
+          if (!s) throw new ErrorApi('SUBIDA_INVALIDA', MENSAJES.SUBIDA_INVALIDA);
+          s.recibido = d.offset + Math.floor(d.datos.length * 3 / 4) - (d.datos.endsWith('==') ? 2 : d.datos.endsWith('=') ? 1 : 0);
+          if (s.recibido < s.total) return { ok: true, completo: false, recibido: s.recibido };
+          delete this.subidas[d.id];
+          const archivo = { id: 'a' + Date.now(), nombre: s.nombre, tipo: s.tipo, tamano: s.total, fecha: new Date().toISOString(), url: '#', subidoPor: yo.email };
+          (this.archivos[s.folio] = this.archivos[s.folio] || []).push(archivo);
+          return { ok: true, completo: true, archivo };
+        }
+        case 'estadoSubida': { const s = this.subidas[d.id]; return { ok: true, completo: false, recibido: s ? s.recibido : 0 }; }
+        case 'eliminarArchivo': {
+          this.archivos[d.folio] = (this.archivos[d.folio] || []).filter((a) => a.id !== d.id);
+          return { ok: true, archivos: this.archivos[d.folio].slice().reverse(), carpetaUrl: null };
+        }
       }
       throw new ErrorApi('ACCION_DESCONOCIDA', accion);
     }
@@ -373,7 +408,9 @@
 
   window.addEventListener('hashchange', () => {
     if (st.ignorarHash) { st.ignorarHash = false; st.hashAnterior = location.hash; return; }
-    if (st.sucio && !confirm('Hay cambios sin guardar en el formulario. ¿Salir sin guardar? (Se conserva un borrador en este equipo.)')) {
+    const salirSinGuardar = !st.sucio || confirm('Hay cambios sin guardar en el formulario. ¿Salir sin guardar? (Se conserva un borrador en este equipo.)');
+    const salirSubiendo = salirSinGuardar && (!st.subiendo || confirm('Se están subiendo archivos. Si sales se interrumpirá la subida. ¿Salir?'));
+    if (!salirSubiendo) {
       st.ignorarHash = true;
       location.hash = st.hashAnterior;
       return;
@@ -382,7 +419,7 @@
     st.hashAnterior = location.hash;
     ruta();
   });
-  window.addEventListener('beforeunload', (e) => { if (st.sucio) { e.preventDefault(); e.returnValue = ''; } });
+  window.addEventListener('beforeunload', (e) => { if (st.sucio || st.subiendo) { e.preventDefault(); e.returnValue = ''; } });
 
   // ---------------------------------------------------------------------------
   // Vista: registros
@@ -457,8 +494,14 @@
     const id = 'f_' + c.id;
     if (c.calculado) return `<output id="${id}" class="valor-calculado vacio" aria-live="polite">—</output>`;
     switch (c.tipo) {
-      case 'texto':
-        return `<input type="text" id="${id}" name="${c.id}" maxlength="${c.longitud || 255}"${c.id === 'folio' ? ' autocapitalize="characters" spellcheck="false"' : ''}>`;
+      case 'texto': {
+        let extra = '';
+        if (c.id === 'folio' || c.mayusculas) extra += ' autocapitalize="characters" spellcheck="false"';
+        if (c.soloDigitos) extra += ' inputmode="numeric" autocomplete="off"';
+        const tipo = c.telefono ? 'tel' : 'text';
+        const campo = `<input type="${tipo}" id="${id}" name="${c.id}" maxlength="${c.soloDigitos ? (c.longitud || 255) + 4 : (c.longitud || 255)}"${extra}>`;
+        return c.telefono ? campo + `<div class="enlaces-tel" id="tel_${c.id}"></div>` : campo;
+      }
       case 'textolargo':
         return `<textarea id="${id}" name="${c.id}" rows="4" maxlength="${c.longitud || 1000}"></textarea>`;
       case 'numero': {
@@ -479,11 +522,12 @@
 
   function htmlCampo(c) {
     const fila = c.fila || c.tipo === 'textolargo';
-    const insignia = c.calculado ? '<span class="insignia primario">calculada</span>' : c.autocalc ? '<span class="insignia">auto</span>' : '';
+    const insignia = c.calculado ? '<span class="insignia primario">calculada</span>' : c.autocalc ? '<span class="insignia">auto</span>'
+      : c.identificador ? '<span class="insignia confidencial" title="Se guarda aparte y nunca se exporta a SPSS">🔒 confidencial</span>' : '';
     const requerido = c.requerido ? ' <span class="insignia error">obligatorio</span>' : '';
     const asistente = c.asistente ? `<button type="button" class="enlace" data-asistente="${c.asistente}">${c.asistente === 'nihss' ? 'Calculadora NIHSS (Anexo 5)' : 'Asistente de entrevista telefónica (Anexo 6)'}</button>` : '';
     const etiquetaTag = c.tipo === 'opcion' || c.calculado ? 'div' : 'label';
-    return `<div class="campo${fila ? ' fila' : ''}" data-campo="${c.id}">
+    return `<div class="campo${fila ? ' fila' : ''}${c.identificador ? ' campo-confidencial' : ''}${c.mayusculas ? ' en-mayusculas' : ''}" data-campo="${c.id}">
         <${etiquetaTag} class="etiqueta" id="lbl_${c.id}"${etiquetaTag === 'label' ? ` for="f_${c.id}"` : ''}>${esc(c.etiqueta)} ${insignia}${requerido}</${etiquetaTag}>
         ${controlCampo(c)}
         ${c.ayuda ? `<p class="ayuda">${esc(c.ayuda)}</p>` : ''}
@@ -517,7 +561,9 @@
       }
       const el = $('#f_' + c.id);
       if (c.tipo === 'numero' && el.validity && el.validity.badInput) { st.numerosInvalidos.push(c.id); r[c.id] = null; return; }
-      const v = el.value.trim();
+      let v = el.value.trim();
+      if (c.soloDigitos) v = v.replace(/\D/g, '');
+      if (c.mayusculas) v = v.toUpperCase();
       r[c.id] = v === '' ? null : (c.tipo === 'numero' ? Number(v) : v);
     });
     if (r.folio) r.folio = r.folio.toUpperCase();
@@ -544,6 +590,13 @@
     const m = E.difMinutos(r.fecha_evento, r.hora_inicio, r.fecha_admision, r.hora_admision);
     const tsp = $('#f_t_sintomas_puerta');
     if (m !== null) { tsp.value = m; tsp.readOnly = true; } else if (tsp.readOnly) { tsp.readOnly = false; tsp.value = ''; r.t_sintomas_puerta = null; }
+
+    // Botones «Llamar» para los teléfonos capturados (útil en el seguimiento desde el celular)
+    E.campos().filter((c) => c.telefono).forEach((c) => {
+      const cont = $('#tel_' + c.id);
+      if (cont) cont.innerHTML = E.telefonos(r[c.id]).map((n) =>
+        `<a class="boton secundario chico" href="tel:${n}">📞 Llamar ${n.slice(0, 3)} ${n.slice(3, 6)} ${n.slice(6)}</a>`).join(' ');
+    });
 
     // Variables calculadas
     E.campos().filter((c) => c.calculado).forEach((c) => {
@@ -657,13 +710,126 @@
     $('#f_folio').readOnly = !st.nuevo;
     actualizarFormulario();
     ofrecerBorrador();
+    $('#lista-subidas').innerHTML = '';
+    cargarArchivos();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Archivos adjuntos (PDF, fotos, videos) → carpeta del folio en Google Drive
+  // ---------------------------------------------------------------------------
+  const MAX_ARCHIVO = 250 * 1024 * 1024;
+  const espera = (ms) => new Promise((r) => setTimeout(r, ms));
+  function tamanoLegible(n) {
+    n = Number(n) || 0;
+    return n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  }
+  function iconoArchivo(tipo) {
+    tipo = String(tipo || '');
+    return tipo === 'application/pdf' ? '📄' : /^image\//.test(tipo) ? '🖼️' : /^video\//.test(tipo) ? '🎬' : '📎';
+  }
+  function blobABase64(blob) {
+    return new Promise((resolve, reject) => {
+      const fr = new FileReader();
+      fr.onload = () => resolve(String(fr.result).split(',')[1] || '');
+      fr.onerror = () => reject(fr.error);
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  async function cargarArchivos() {
+    const aviso = $('#archivos-aviso');
+    $('#enlace-carpeta').hidden = true;
+    if (st.nuevo) {
+      $('#btn-adjuntar').hidden = true;
+      $('#lista-archivos').innerHTML = '';
+      aviso.textContent = 'Guarda el registro para poder adjuntar archivos.';
+      return;
+    }
+    $('#btn-adjuntar').hidden = false;
+    aviso.textContent = 'Cargando archivos…';
+    try { pintarArchivos(await api('listarArchivos', { folio: st.registro.folio })); }
+    catch (e) { aviso.textContent = mensajeError(e); }
+  }
+
+  function pintarArchivos(r) {
+    const lista = r.archivos || [];
+    $('#archivos-aviso').textContent = lista.length ? '' : 'Sin archivos adjuntos.';
+    $('#lista-archivos').innerHTML = lista.map((a) => {
+      const puedeBorrar = esAdmin() || a.subidoPor === st.usuario.email;
+      return `<li class="archivo">
+        <span class="icono-archivo" aria-hidden="true">${iconoArchivo(a.tipo)}</span>
+        <div class="archivo-info"><a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(a.nombre)}</a>
+          <small>${tamanoLegible(a.tamano)} · ${esc(fechaHora(a.fecha))}${a.subidoPor ? ' · ' + esc(a.subidoPor) : ''}</small></div>
+        ${puedeBorrar ? `<button type="button" class="boton peligro chico" data-borrar="${esc(a.id)}" data-nombre="${esc(a.nombre)}">Eliminar</button>` : ''}
+      </li>`;
+    }).join('');
+    const enlace = $('#enlace-carpeta');
+    if (r.carpetaUrl) { enlace.href = r.carpetaUrl; enlace.hidden = false; }
+  }
+
+  async function subirArchivos(archivos) {
+    for (const f of archivos) await subirUno(f);
+    if (!st.nuevo) await cargarArchivos();
+  }
+
+  async function subirUno(file) {
+    const li = document.createElement('li');
+    li.className = 'archivo subiendo';
+    li.innerHTML = `<span class="icono-archivo" aria-hidden="true">${iconoArchivo(file.type)}</span>
+      <div class="archivo-info"><b>${esc(file.name)}</b>
+        <small>${tamanoLegible(file.size)} · <span class="estado-subida">preparando…</span></small>
+        <div class="barra-avance ancha"><span></span></div></div>`;
+    $('#lista-subidas').appendChild(li);
+    const barra = $('.barra-avance span', li);
+    const estado = $('.estado-subida', li);
+    st.subiendo = (st.subiendo || 0) + 1;
+    try {
+      if (!file.size) throw new Error('El archivo está vacío.');
+      if (file.size > MAX_ARCHIVO) throw new Error('Supera el máximo de 250 MB por archivo.');
+      const ini = await api('iniciarSubida', { folio: st.registro.folio, nombre: file.name, tipo: file.type, tamano: file.size });
+      let off = 0, fallos = 0;
+      while (off < file.size) {
+        try {
+          const fin = Math.min(off + ini.fragmento, file.size);
+          const r = await api('subirFragmento', { id: ini.id, offset: off, datos: await blobABase64(file.slice(off, fin)) });
+          fallos = 0;
+          off = r.completo ? file.size : r.recibido;
+        } catch (e) {
+          if (e.codigo !== 'RED' || ++fallos > 4) throw e;
+          estado.textContent = 'reintentando…';
+          await espera(2000 * fallos);
+          const s = await api('estadoSubida', { id: ini.id });   // reanuda donde se quedó Drive
+          off = s.completo ? file.size : s.recibido;
+        }
+        const pct = Math.round(100 * off / file.size);
+        barra.style.width = pct + '%';
+        estado.textContent = `subiendo… ${pct} %`;
+      }
+      li.remove();
+      toast('«' + file.name + '» se guardó en la carpeta de ' + st.registro.folio + '.', 'ok');
+    } catch (e) {
+      li.classList.add('con-error');
+      estado.textContent = 'No se pudo subir: ' + mensajeError(e);
+    } finally {
+      st.subiendo--;
+    }
+  }
+
+  async function eliminarArchivo(id, nombre) {
+    if (!confirm(`¿Enviar «${nombre}» a la papelera de Google Drive? (Se puede recuperar durante 30 días.)`)) return;
+    try {
+      cargando('Eliminando…');
+      pintarArchivos(await api('eliminarArchivo', { folio: st.registro.folio, id }));
+      toast('Archivo enviado a la papelera.', 'ok');
+    } catch (e) { toast(mensajeError(e), 'error'); } finally { cargando(null); }
   }
 
   // --- Borrador local (protege contra cierres accidentales o caída de internet)
   function claveBorrador() { return 'evc:borrador:' + (st.usuario ? st.usuario.email : 'anonimo'); }
   const guardarBorrador = debounce(() => {
     if (!st.sucio) return;
-    ls.escribir(claveBorrador(), { nuevo: st.nuevo, version: st.version, fecha: new Date().toISOString(), registro: leerFormulario() });
+    // El borrador local nunca guarda nombre, NSS ni teléfono (podría ser un equipo compartido)
+    ls.escribir(claveBorrador(), { nuevo: st.nuevo, version: st.version, fecha: new Date().toISOString(), registro: E.sinIdentificadores(leerFormulario()) });
   }, 800);
   function ofrecerBorrador() {
     const b = ls.leer(claveBorrador());
@@ -676,6 +842,8 @@
       <button type="button" class="boton secundario chico" id="btn-descartar">Descartar</button>`;
     aviso.hidden = false;
     $('#btn-recuperar').onclick = () => {
+      const actuales = leerFormulario();   // conserva los datos de localización ya cargados
+      E.camposIdentificacion().forEach((c) => { if (b.registro[c.id] === undefined) b.registro[c.id] = actuales[c.id]; });
       escribirFormulario(b.registro);
       if (!st.nuevo) $('#f_folio').value = st.registro.folio;
       st.sucio = true;
@@ -713,6 +881,7 @@
       history.replaceState(null, '', '#/registro/' + encodeURIComponent(res.registro.folio));
       st.hashAnterior = location.hash;
       $$('#nav a').forEach((x) => x.classList.toggle('activo', x.dataset.vista === 'registros'));
+      cargarArchivos();   // un registro recién guardado ya admite adjuntos
       toast('Registro ' + res.registro.folio + (DEMO ? ' guardado (demostración).' : ' guardado en Google Drive.'), 'ok');
     } catch (e) {
       if (e.codigo === 'VALIDACION' && e.detalles) {
@@ -842,6 +1011,15 @@
       sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     $('#btn-guardar').addEventListener('click', guardar);
+    $('#input-archivos').addEventListener('change', (e) => {
+      const archivos = Array.from(e.target.files || []);
+      e.target.value = '';
+      if (archivos.length) subirArchivos(archivos);
+    });
+    $('#lista-archivos').addEventListener('click', (e) => {
+      const b = e.target.closest('button[data-borrar]');
+      if (b) eliminarArchivo(b.dataset.borrar, b.dataset.nombre);
+    });
     $('#btn-avisos').addEventListener('click', mostrarAvisos);
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's' && !$('#vista-formulario').hidden) { e.preventDefault(); guardar(); }
@@ -863,10 +1041,11 @@
     } catch (e) { cuerpo.innerHTML = `<tr><td colspan="6" class="vacio">${esc(mensajeError(e))}</td></tr>`; }
   }
 
-  const CLASE_ESTADO = { aprobado: 'ok', pendiente: 'aviso', rechazado: 'error' };
+  const CLASE_ESTADO = { aprobado: 'ok', pendiente: 'aviso' };
   function pintarUsuarios() {
-    const orden = { pendiente: 0, aprobado: 1, rechazado: 2 };
-    const lista = st.usuarios.slice().sort((a, b) => (orden[a.estado] - orden[b.estado]) || a.email.localeCompare(b.email));
+    const orden = { pendiente: 0, aprobado: 1 };
+    const lista = st.usuarios.filter((u) => u.estado !== 'rechazado')
+      .sort((a, b) => ((orden[a.estado] || 0) - (orden[b.estado] || 0)) || a.email.localeCompare(b.email));
     st.pendientes = lista.filter((u) => u.estado === 'pendiente').length;
     $('#contador-pendientes').textContent = st.pendientes;
     $('#contador-pendientes').hidden = !st.pendientes;
@@ -877,11 +1056,12 @@
       else if (u.email === yo) acciones = '<span class="texto-tenue">Tu cuenta</span>';
       else {
         const b = (txt, datos, clase) => `<button type="button" class="boton chico ${clase || 'secundario'}" data-email="${esc(u.email)}" data-cambio='${esc(JSON.stringify(datos))}'>${txt}</button>`;
-        if (u.estado !== 'aprobado') acciones += b('Aprobar', { estado: 'aprobado' }, 'primario');
-        if (u.estado === 'pendiente') acciones += ' ' + b('Rechazar', { estado: 'rechazado' }, 'peligro');
-        if (u.estado === 'aprobado') {
+        if (u.estado !== 'aprobado') {
+          acciones += b('Aprobar', { estado: 'aprobado' }, 'primario');
+          acciones += ' ' + b('Rechazar', { eliminar: 'rechazar' }, 'peligro');
+        } else {
           acciones += u.rol === 'admin' ? b('Quitar admin', { rol: 'capturista' }) : b('Hacer admin', { rol: 'admin' });
-          acciones += ' ' + b('Revocar acceso', { estado: 'rechazado' }, 'peligro');
+          acciones += ' ' + b('Revocar acceso', { eliminar: 'revocar' }, 'peligro');
         }
       }
       return `<tr>
@@ -897,13 +1077,16 @@
 
   async function cambiarUsuario(email, cambio) {
     if (cambio.rol === 'admin' && !confirm(`¿Dar rol de administrador a ${email}? Podrá aprobar usuarios y exportar la base completa.`)) return;
-    if (cambio.estado === 'rechazado' && !confirm(`¿Quitar el acceso a ${email}?`)) return;
+    if (cambio.eliminar === 'rechazar' && !confirm(`¿Rechazar la solicitud de ${email}? Se eliminará de la lista.`)) return;
+    if (cambio.eliminar === 'revocar' && !confirm(`¿Quitar el acceso a ${email}? Se eliminará de la lista y perderá su sesión de inmediato.`)) return;
     try {
       cargando('Actualizando…');
-      const r = await api('actualizarUsuario', Object.assign({ email }, cambio));
+      const r = cambio.eliminar
+        ? await api('eliminarUsuario', { email })
+        : await api('actualizarUsuario', Object.assign({ email }, cambio));
       st.usuarios = r.usuarios;
       pintarUsuarios();
-      toast('Usuario actualizado.', 'ok');
+      toast(cambio.eliminar ? 'Usuario eliminado de la lista.' : 'Usuario actualizado.', 'ok');
     } catch (e) { toast(mensajeError(e), 'error'); } finally { cargando(null); }
   }
 

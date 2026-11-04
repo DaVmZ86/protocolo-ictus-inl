@@ -14,7 +14,8 @@ var EVC_SPSS = (function () {
 
   var NIVEL_SPSS = { nominal: 'NOMINAL', ordinal: 'ORDINAL', escala: 'SCALE' };
 
-  function variables() { return EVC.campos(); }
+  // Sólo variables de análisis: los datos de localización del paciente nunca se exportan
+  function variables() { return EVC.camposAnalisis(); }
 
   function formato(c) {
     switch (c.tipo) {

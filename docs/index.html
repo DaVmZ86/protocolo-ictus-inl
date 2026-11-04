@@ -13,7 +13,7 @@
   <meta name="theme-color" content="#0f766e">
   <meta name="apple-mobile-web-app-title" content="Cédula EVC">
   <!-- ?v=… obliga a celulares y computadoras a descargar la versión nueva tras cada publicación -->
-  <link rel="stylesheet" href="css/estilos.css?v=1.1.0">
+  <link rel="stylesheet" href="css/estilos.css?v=1.2.0">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
@@ -57,8 +57,8 @@
         <div id="boton-google" class="boton-google"></div>
         <a id="enlace-real" class="boton primario" href="./" hidden>Iniciar sesión con Google</a>
         <button id="btn-demo" class="boton secundario" type="button" hidden>Entrar en modo demostración</button>
-        <p class="nota">Los datos se guardan en una hoja de cálculo privada en Google Drive. No se capturan nombres,
-          números de afiliación, domicilios ni teléfonos de los pacientes; cada caso se identifica con un folio.
+        <p class="nota">Acceso restringido a los investigadores autorizados. Los datos se guardan en una hoja de cálculo privada en Google Drive;
+          la base que se exporta para el análisis sólo identifica a cada caso con un folio.
           <a href="privacidad.html">Aviso de privacidad</a>.</p>
       </div>
     </section>
@@ -115,6 +115,19 @@
       <nav id="indice-secciones" class="indice-secciones" aria-label="Secciones del formulario"></nav>
       <div id="aviso-borrador" class="aviso" hidden></div>
       <form id="formulario" novalidate autocomplete="off"></form>
+      <section id="seccion-archivos" class="seccion archivos" aria-labelledby="titulo-archivos">
+        <div class="archivos-cabecera">
+          <h3 id="titulo-archivos">Archivos adjuntos</h3>
+          <span class="texto-tenue">PDF, fotos y videos (hasta 250 MB c/u). Se guardan en la carpeta de este folio en Google Drive.</span>
+        </div>
+        <label id="btn-adjuntar" class="boton primario" hidden>📎 Adjuntar archivos
+          <input type="file" id="input-archivos" multiple accept="application/pdf,image/*,video/*" hidden>
+        </label>
+        <p id="archivos-aviso" class="texto-tenue"></p>
+        <ul id="lista-subidas" class="lista-archivos"></ul>
+        <ul id="lista-archivos" class="lista-archivos"></ul>
+        <a id="enlace-carpeta" class="enlace-carpeta" target="_blank" rel="noopener" hidden>Abrir la carpeta de este folio en Google Drive ↗</a>
+      </section>
       <div class="pie-guardar">
         <button id="btn-avisos" class="avisos-resumen" type="button" hidden></button>
         <span id="estado-guardado" class="estado-guardado"></span>
@@ -174,8 +187,10 @@
           <li>Si ves «Modo demostración», toca «Salir e iniciar sesión con Google» o abre la dirección sin <code>?demo</code> al final.</li>
         </ol>
         <h3>Confidencialidad</h3>
-        <p>No escribas nombre, NSS, domicilio ni teléfono en ningún campo (tampoco en observaciones). La lista que relaciona cada folio con el expediente
-          debe resguardarse fuera de esta aplicación, en un archivo protegido con contraseña, con acceso sólo para el investigador principal y el asesor.</p>
+        <p>El nombre, el NSS y el teléfono del paciente (marcados 🔒) sirven sólo para localizar el expediente y hacer el seguimiento.
+          Se guardan aparte, en la hoja «Identificacion», y <b>nunca</b> se incluyen en la exportación a SPSS ni en la lista de registros.
+          No los escribas en otros campos (por ejemplo, en observaciones). Los archivos adjuntos pueden contener datos personales:
+          súbelos sólo cuando sean necesarios para el protocolo.</p>
         <h3>Escala de Rankin modificada (Anexo 4)</h3>
         <div id="tabla-mrs"></div>
         <h3>Diccionario de variables</h3>
@@ -189,9 +204,9 @@
   <div id="cargando" class="cargando-global" hidden><div class="giro"></div><span id="cargando-texto">Cargando…</span></div>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script src="js/config.js?v=1.1.0"></script>
-  <script src="js/esquema.js?v=1.1.0"></script>
-  <script src="js/spss.js?v=1.1.0"></script>
-  <script src="js/app.js?v=1.1.0"></script>
+  <script src="js/config.js?v=1.2.0"></script>
+  <script src="js/esquema.js?v=1.2.0"></script>
+  <script src="js/spss.js?v=1.2.0"></script>
+  <script src="js/app.js?v=1.2.0"></script>
 </body>
 </html>
