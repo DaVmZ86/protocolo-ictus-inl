@@ -8,6 +8,7 @@ Aplicación web **gratuita y de código abierto** para capturar la *Hoja de reco
 - Formularios con las 8 secciones del Anexo 3, criterios de selección, NIHSS (Anexo 5) y entrevista telefónica de la mRS (Anexo 6).
 - Cálculo automático de **NLR**, **NLR ≥ 3,51**, **categoría NIHSS**, **tiempo síntomas-puerta**, **ventana de 90 ± 14 días**, **mRS dicotómica** y **dictamen**.
 - Los datos se guardan en una **hoja de Google Sheets privada en tu Google Drive** (una fila por paciente, valores codificados).
+- **Archivos adjuntos por registro** (PDF, fotos y videos de hasta 250 MB) en una carpeta de Google Drive por folio.
 - Exportación a **IBM SPSS 27** (CSV + sintaxis `.sps` con etiquetas de variables y de valores).
 
 **Aplicación:** https://davmz86.github.io/protocolo-ictus-inl/  
